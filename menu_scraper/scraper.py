@@ -7,6 +7,8 @@ import re
 import shutil
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
+import asyncio
+import shutil
 
 import httpx
 from parsel import Selector
@@ -110,83 +112,90 @@ async def scrape_menu(
     timeout: int = 30,
     download_media: bool = True,
 ) -> MenuResult:
-    """Fetch a URL, crawl subpages, and extract menu data via Gemini."""
     site_dir: Path = RUN_DIR / _url_to_dirname(url)
+    
+    # Асинхронная очистка и создание директорий
     if site_dir.exists():
-        shutil.rmtree(site_dir)
-    site_dir.mkdir(parents=True, exist_ok=True)
+        await asyncio.to_thread(shutil.rmtree, site_dir)
+    await asyncio.to_thread(site_dir.mkdir, parents=True, exist_ok=True)
 
     settings = get_settings()
-    extractor: GeminiMenuExtractor = GeminiMenuExtractor(api_key=settings.gemini_api_key)
+    extractor = GeminiMenuExtractor(api_key=settings.gemini_api_key)
 
-    all_items: list[MenuItem] = []
-    all_media: list[MediaFile] = []
-    visited: set[str] = set()
+    visited: set[str] = {url}
+    current_urls: list[str] = [url]
+    
     all_clean_texts: list[str] = []
+    all_media: list[MediaFile] = []
 
-    # BFS queue: (url, depth)
-    queue: list[tuple[str, int]] = [(url, 0)]
+    # Вспомогательная функция для обработки одного URL
+    async def _process_url(client: httpx.AsyncClient, current_url: str, depth: int):
+        result = await _fetch_page(client, current_url, site_dir, depth)
+        if not result:
+            return None
+            
+        html, page_url = result
+        sel = Selector(text=html)
+        clean_text = clean_html(html)
+        
+        media = _extract_pdf_links(sel, page_url) + _extract_menu_images(sel, page_url)
+        sub_links = _find_subpage_links(sel, page_url) if depth < MAX_DEPTH else []
+            
+        return clean_text, media, sub_links
 
     async with httpx.AsyncClient(
-        follow_redirects=True,
-        timeout=float(timeout),
-        headers={"User-Agent": USER_AGENT},
+        follow_redirects=True, 
+        timeout=float(timeout), 
+        headers={"User-Agent": USER_AGENT}
     ) as client:
-        while queue and len(visited) < MAX_PAGES:
-            current_url, depth = queue.pop(0)
-            if current_url in visited:
-                continue
-            visited.add(current_url)
+        # Поуровневый обход (BFS)
+        for depth in range(MAX_DEPTH + 1):
+            if not current_urls or len(visited) >= MAX_PAGES:
+                break
 
-            result = await _fetch_page(client, current_url, site_dir, depth)
-            if result is None:
-                continue
+            # Параллельный запуск всех URL на текущем уровне глубины
+            tasks = [_process_url(client, u, depth) for u in current_urls]
+            results = await asyncio.gather(*tasks)
 
-            html, page_url = result
-            sel: Selector = Selector(text=html)
+            next_urls = set()
+            for res in results:
+                if not res: 
+                    continue
+                
+                text, media, links = res
+                if text.strip(): 
+                    all_clean_texts.append(text)
+                all_media.extend(media)
+                
+                # Собираем уникальные ссылки для следующего уровня
+                for link in links:
+                    if link not in visited and len(visited) + len(next_urls) < MAX_PAGES:
+                        visited.add(link)
+                        next_urls.add(link)
+            
+            current_urls = list(next_urls)
 
-            # Clean HTML and collect text for LLM
-            print(f'html {html}')
-            clean_text: str = clean_html(html)
-            if clean_text.strip():
-                all_clean_texts.append(clean_text)
-
-            print(f'Clean html {clean_text}')
-
-            # Collect media references
-            all_media.extend(_extract_pdf_links(sel, page_url))
-            all_media.extend(_extract_menu_images(sel, page_url))
-
-            # Discover subpage links
-            if depth < MAX_DEPTH:
-                for link in _find_subpage_links(sel, page_url):
-                    if link not in visited:
-                        queue.append((link, depth + 1))
-
-    print(all_clean_texts)
-    # Send all collected text to Gemini in one call
+    # Отправка собранного текста в Gemini
     combined_text: str = "\n\n---PAGE BREAK---\n\n".join(all_clean_texts)
-    if combined_text.strip():
-        all_items = await extractor.extract(combined_text)
+    all_items = await extractor.extract(combined_text) if combined_text.strip() else []
 
-    # Deduplicate items
-    seen_names: set[str] = set()
-    unique_items: list[MenuItem] = []
+    # Дедупликация (остается без изменений)
+    seen_names = set()
+    unique_items = []
     for item in all_items:
-        key: str = item.name.lower().strip()
+        key = item.name.lower().strip()
         if key not in seen_names:
             seen_names.add(key)
             unique_items.append(item)
 
-    # Deduplicate media by URL
-    seen_urls: set[str] = set()
-    unique_media: list[MediaFile] = []
+    seen_urls = set()
+    unique_media = []
     for mf in all_media:
         if mf.original_url not in seen_urls:
             seen_urls.add(mf.original_url)
             unique_media.append(mf)
 
-    source_type: MenuSourceType = MenuSourceType.HTML_TEXT
+    source_type = MenuSourceType.HTML_TEXT
     if not unique_items and unique_media:
         source_type = unique_media[0].media_type
 
