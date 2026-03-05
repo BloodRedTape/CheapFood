@@ -32,4 +32,3 @@ class MenuResult(BaseModel):
     items: list[MenuItem] = Field(default_factory=list)
     source_type: MenuSourceType = MenuSourceType.HTML_TEXT
     media_files: list[MediaFile] = Field(default_factory=list)
-    raw_text: str | None = None
