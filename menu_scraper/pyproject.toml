@@ -3,7 +3,7 @@ requires = ["setuptools>=75.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "cheapfood-menu-scraper"
+name = "menu-scraper"
 version = "0.1.0"
 description = "Microservice that scrapes restaurant menus and returns structured JSON"
 requires-python = ">=3.11"
@@ -14,6 +14,8 @@ dependencies = [
     "uvicorn[standard]>=0.34",
     "pydantic>=2.10",
     "pydantic-settings>=2.7",
+    "google-genai>=1.0",
+    "trafilatura",
 ]
 
 [tool.setuptools.packages.find]
@@ -22,13 +24,8 @@ include = ["menu_scraper*"]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.0",
-    "pytest-asyncio>=0.24",
     "mypy>=1.14",
     "ruff>=0.9",
-]
-ocr = [
-    "google-generativeai>=0.8",
 ]
 
 [tool.mypy]
@@ -40,7 +37,3 @@ warn_unused_configs = true
 [tool.ruff]
 target-version = "py311"
 line-length = 100
-
-[tool.pytest.ini_options]
-asyncio_mode = "auto"
-testpaths = ["tests"]

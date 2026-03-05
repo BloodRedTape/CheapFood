@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_ENV_FILE: Path = Path(__file__).resolve().parent / ".env"
 
 
 class ScraperSettings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="SCRAPER_", env_file=".env")
+    model_config = SettingsConfigDict(env_prefix="SCRAPER_", env_file=_ENV_FILE)
 
     host: str = "0.0.0.0"
     port: int = 8000

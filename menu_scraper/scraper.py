@@ -1,4 +1,4 @@
-"""Core scraper: fetches URL with httpx, crawls subpages, parses HTML with parsel."""
+"""Core scraper: fetches URL with httpx, crawls subpages, extracts menus via Gemini."""
 from __future__ import annotations
 
 import hashlib
@@ -11,13 +11,15 @@ from urllib.parse import urljoin, urlparse
 import httpx
 from parsel import Selector
 
+from menu_scraper.config import get_settings
 from menu_scraper.models.menu import (
     MediaFile,
     MenuItem,
     MenuResult,
     MenuSourceType,
 )
-from menu_scraper.processing.html_extractor import HtmlMenuExtractor
+from menu_scraper.processing.html_cleaner import clean_html
+from menu_scraper.processing.llm_extractor import GeminiMenuExtractor
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -31,15 +33,6 @@ MENU_KEYWORDS: set[str] = {
     "burger", "sandwich", "price", "order",
     "תפריט", "מנות", "מחיר",
 }
-
-PRICE_PATTERN: re.Pattern[str] = re.compile(
-    r"""
-    (?:[\$€£])\s*\d+(?:[.,]\d{1,2})?
-    | \d+(?:[.,]\d{1,2})?\s*(?:[\$€£₪])
-    | \d+(?:[.,]\d{1,2})?\s*(?:NIS|ש"ח|ILS|EUR|USD)
-    """,
-    re.VERBOSE | re.IGNORECASE,
-)
 
 USER_AGENT: str = "MenuScraper/1.0"
 
@@ -77,7 +70,6 @@ def _find_subpage_links(sel: Selector, base_url: str) -> list[str]:
         full_url: str = urljoin(base_url, href)
         if not _same_domain(full_url, base_url):
             continue
-        # Strip fragment
         full_url = full_url.split("#")[0]
         anchor_text: str = " ".join(a.css("::text").getall()).strip().lower()
         combined: str = f"{anchor_text} {full_url.lower()}"
@@ -118,16 +110,19 @@ async def scrape_menu(
     timeout: int = 30,
     download_media: bool = True,
 ) -> MenuResult:
-    """Fetch a URL, crawl subpages, and extract menu data."""
+    """Fetch a URL, crawl subpages, and extract menu data via Gemini."""
     site_dir: Path = RUN_DIR / _url_to_dirname(url)
     if site_dir.exists():
         shutil.rmtree(site_dir)
     site_dir.mkdir(parents=True, exist_ok=True)
 
-    extractor: HtmlMenuExtractor = HtmlMenuExtractor()
+    settings = get_settings()
+    extractor: GeminiMenuExtractor = GeminiMenuExtractor(api_key=settings.gemini_api_key)
+
     all_items: list[MenuItem] = []
     all_media: list[MediaFile] = []
     visited: set[str] = set()
+    all_clean_texts: list[str] = []
 
     # BFS queue: (url, depth)
     queue: list[tuple[str, int]] = [(url, 0)]
@@ -148,23 +143,31 @@ async def scrape_menu(
                 continue
 
             html, page_url = result
-
             sel: Selector = Selector(text=html)
-            page_base: str = page_url
 
-            # Extract menu items
-            items: list[MenuItem] = _extract_text_items(sel, extractor)
-            all_items.extend(items)
+            # Clean HTML and collect text for LLM
+            print(f'html {html}')
+            clean_text: str = clean_html(html)
+            if clean_text.strip():
+                all_clean_texts.append(clean_text)
+
+            print(f'Clean html {clean_text}')
 
             # Collect media references
-            all_media.extend(_extract_pdf_links(sel, page_base))
-            all_media.extend(_extract_menu_images(sel, page_base))
+            all_media.extend(_extract_pdf_links(sel, page_url))
+            all_media.extend(_extract_menu_images(sel, page_url))
 
             # Discover subpage links
             if depth < MAX_DEPTH:
-                for link in _find_subpage_links(sel, page_base):
+                for link in _find_subpage_links(sel, page_url):
                     if link not in visited:
                         queue.append((link, depth + 1))
+
+    print(all_clean_texts)
+    # Send all collected text to Gemini in one call
+    combined_text: str = "\n\n---PAGE BREAK---\n\n".join(all_clean_texts)
+    if combined_text.strip():
+        all_items = await extractor.extract(combined_text)
 
     # Deduplicate items
     seen_names: set[str] = set()
@@ -193,46 +196,6 @@ async def scrape_menu(
         source_type=source_type,
         media_files=unique_media,
     )
-
-
-def _extract_text_items(sel: Selector, extractor: HtmlMenuExtractor) -> list[MenuItem]:
-    """Extract menu items from HTML text content."""
-    menu_selectors: list[str] = [
-        "[class*='menu']", "[id*='menu']",
-        "[class*='dish']", "[class*='food']",
-        "[class*='price']", "[class*='item']",
-        ".product", ".meal",
-    ]
-
-    seen_texts: set[str] = set()
-    all_items: list[MenuItem] = []
-
-    for css_sel in menu_selectors:
-        for element in sel.css(css_sel):
-            text: str = " ".join(element.css("::text").getall()).strip()
-            if not text or text in seen_texts:
-                continue
-            if _looks_like_menu(text):
-                seen_texts.add(text)
-                html_content: str = element.get() or ""
-                items = extractor.extract(text=text, html=html_content)
-                all_items.extend(items)
-
-    # Tables with price patterns
-    for table in sel.css("table"):
-        text = " ".join(table.css("::text").getall()).strip()
-        if text not in seen_texts and PRICE_PATTERN.search(text):
-            seen_texts.add(text)
-            items = extractor.extract(text=text, html=table.get() or "")
-            all_items.extend(items)
-
-    # Fallback: scan whole body
-    if not all_items:
-        body_text: str = " ".join(sel.css("body ::text").getall()).strip()
-        if PRICE_PATTERN.search(body_text):
-            all_items = extractor.extract(text=body_text, html="")
-
-    return all_items
 
 
 def _extract_pdf_links(sel: Selector, base_url: str) -> list[MediaFile]:
@@ -274,9 +237,3 @@ def _extract_menu_images(sel: Selector, base_url: str) -> list[MediaFile]:
                 media_type=MenuSourceType.IMAGE,
             ))
     return results
-
-
-def _looks_like_menu(text: str) -> bool:
-    """Check if text looks like it contains menu items."""
-    text_lower: str = text.lower()
-    return any(kw in text_lower for kw in MENU_KEYWORDS) or bool(PRICE_PATTERN.search(text))
