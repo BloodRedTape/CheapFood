@@ -47,16 +47,16 @@ class GeminiMenuExtractor:
             logger.info("No text provided")
             return []
 
-        truncated: str = clean_text[:30_000]
-        prompt: str = f"{SYSTEM_PROMPT}\n\n---\n\n{truncated}"
+        # Убрали обрезку текста
+        prompt: str = f"{SYSTEM_PROMPT}\n\n---\n\n{clean_text}"
 
         try:
-            response = self._client.models.generate_content(
+            response = await self._client.aio.models.generate_content(
                 model=self._model,
                 contents=prompt,
                 config={
                     "response_mime_type": "application/json",
-                    "response_json_schema": MenuItemList.model_json_schema(),
+                    "response_schema": MenuItemList,  # Передаем класс Pydantic напрямую
                 },
             )
             response_text: str = response.text or ""
@@ -66,15 +66,14 @@ class GeminiMenuExtractor:
             logger.info("Gemini extracted %d items", len(result.items))
 
             if log_path is not None:
-                _save_log(log_path, truncated, response_text)
+                _save_log(log_path, clean_text, response_text)
 
             return result.items
         except Exception:
             logger.exception("Gemini extraction failed")
             if log_path is not None:
-                _save_log(log_path, truncated, "ERROR: see application logs")
+                _save_log(log_path, clean_text, "ERROR: see application logs")
             return []
-
 
 def _save_log(log_path: Path, request_text: str, response_text: str) -> None:
     """Save LLM request/response pair to a text file."""
