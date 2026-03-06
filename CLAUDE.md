@@ -44,3 +44,6 @@
 ## Frontend UI
 - Frontend should be in a mobile app style
 - UI text by default should be English
+
+
+NEVER READ .env FILES!!!

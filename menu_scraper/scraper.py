@@ -1,4 +1,4 @@
-"""Core scraper: fetches URL with httpx, crawls subpages, extracts menus via Gemini."""
+"""Core scraper: fetches URL with httpx, crawls subpages, extracts menus via OpenAI/Gemini."""
 from __future__ import annotations
 
 import asyncio
@@ -19,7 +19,8 @@ from menu_scraper.models.menu import (
     MenuSourceType,
 )
 from menu_scraper.processing.html_cleaner import clean_html
-from menu_scraper.processing.llm_extractor import GeminiMenuExtractor
+from menu_scraper.processing.html_extractor import HtmlMenuExtractor
+from menu_scraper.processing.pdf_extractor import PdfMenuExtractor
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -143,7 +144,8 @@ async def scrape_menu(
     await asyncio.to_thread(site_dir.mkdir, parents=True, exist_ok=True)
 
     settings = get_settings()
-    extractor = GeminiMenuExtractor(api_key=settings.gemini_api_key)
+    html_extractor = HtmlMenuExtractor(api_key=settings.openai_api_key)
+    pdf_extractor = PdfMenuExtractor(api_key=settings.gemini_api_key)
 
     visited: set[str] = {url}
     current_urls: list[str] = [url]
@@ -229,7 +231,7 @@ async def scrape_menu(
             media_file.local_path = str(local_path)
             log_path = local_path.with_suffix(".llm.txt")
             logger.info("LLM: processing PDF %s", media_file.original_url)
-            items = await extractor.extract_from_pdf(
+            items = await pdf_extractor.extract(
                 pdf_data, source_url=media_file.original_url, log_path=log_path,
             )
             logger.info("LLM: done PDF %s — found %d items", media_file.original_url, len(items))
@@ -248,7 +250,7 @@ async def scrape_menu(
             text, fname = batch_texts[0]
             log_path = site_dir / fname.replace(".html", ".llm.txt")
             logger.info("LLM: processing HTML %s", fname)
-            items = await extractor.extract(text, log_path=log_path)
+            items = await html_extractor.extract(text, log_path=log_path)
             logger.info("LLM: done HTML %s — found %d items", fname, len(items))
         else:
             names = [f for _, f in batch_texts]
@@ -256,7 +258,7 @@ async def scrape_menu(
             combined = "\n\n---PAGE BREAK---\n\n".join(t for t, _ in batch_texts)
             log_name = batch_texts[0][1].replace(".html", "") + "_batch.llm.txt"
             log_path = site_dir / log_name
-            items = await extractor.extract(combined, log_path=log_path)
+            items = await html_extractor.extract(combined, log_path=log_path)
             logger.info("LLM: done HTML batch — found %d items", len(items))
         all_items.extend(items)
         batch_texts = []
@@ -269,7 +271,7 @@ async def scrape_menu(
             await _flush_batch()
             log_path = site_dir / html_filename.replace(".html", ".llm.txt")
             logger.info("LLM: processing HTML %s (%d chars)", html_filename, text_len)
-            items = await extractor.extract(clean_text, log_path=log_path)
+            items = await html_extractor.extract(clean_text, log_path=log_path)
             logger.info("LLM: done HTML %s — found %d items", html_filename, len(items))
             all_items.extend(items)
             continue
