@@ -21,19 +21,32 @@ class TranslationService {
   }
 
   Future<MenuCategory> _translateCategory(MenuCategory category, String language) async {
-    // Compact format: [categoryName, [[name, description|null], ...]]
-    // null categoryName if absent.
-    final inputItems = category.items.map((i) => [i.name, i.description]).toList();
-    final input = [category.name, inputItems];
+    // Build a flat list of non-null strings to translate, tracking their origin slots.
+    // Each slot is (itemIndex, isDescription): itemIndex == -1 means category name.
+    final strings = <String>[];
+    final slots = <(int, bool)>[];
+
+    if (category.name != null) {
+      strings.add(category.name!);
+      slots.add((-1, false));
+    }
+    for (var i = 0; i < category.items.length; i++) {
+      final item = category.items[i];
+      strings.add(item.name);
+      slots.add((i, false));
+      if (item.description != null) {
+        strings.add(item.description!);
+        slots.add((i, true));
+      }
+    }
+
+    if (strings.isEmpty) return category;
 
     final prompt = '''
-You are a menu translator. Translate the following menu category to the language with BCP-47 tag "$language".
-Input is a JSON array: [categoryName, [[name, description], ...]] where categoryName or description may be null.
-Return ONLY a raw JSON array in the same format with translated strings. Keep null values as null. No extra text or code fences.
+You are a menu translator. Translate the following JSON array of strings to the language with BCP-47 tag "$language".
+Return ONLY a raw JSON array of the same length with translated strings. No extra text or code fences.
 
-Input:
-${jsonEncode(input)}
-''';
+${jsonEncode(strings)}''';
 
     final body = jsonEncode({
       'model': _openaiModel,
@@ -73,25 +86,41 @@ ${jsonEncode(input)}
     final start = text.indexOf('[');
     final end = text.lastIndexOf(']');
     if (start == -1 || end == -1) throw Exception('No JSON array found in OpenAI response: $text');
-    final parsed = jsonDecode(text.substring(start, end + 1)) as List<dynamic>;
-    final translatedName = parsed[0] as String? ?? category.name;
-    final rawItems = parsed[1] as List<dynamic>;
+    final translated = jsonDecode(text.substring(start, end + 1)) as List<dynamic>;
 
-    if (rawItems.length != category.items.length) {
-      throw Exception('OpenAI returned ${rawItems.length} items, expected ${category.items.length} for category "${category.name}"');
+    if (translated.length != strings.length) {
+      throw Exception('OpenAI returned ${translated.length} strings, expected ${strings.length} for category "${category.name}"');
+    }
+
+    // Reconstruct category from translated strings using slots.
+    String? translatedCategoryName = category.name;
+    final translatedNames = List<String>.from(category.items.map((i) => i.name));
+    final translatedDescs = List<String?>.from(category.items.map((i) => i.description));
+
+    for (var i = 0; i < slots.length; i++) {
+      final (itemIndex, isDescription) = slots[i];
+      final value = translated[i] as String? ?? strings[i];
+      if (itemIndex == -1) {
+        translatedCategoryName = value;
+      } else if (isDescription) {
+        translatedDescs[itemIndex] = value;
+      } else {
+        translatedNames[itemIndex] = value;
+      }
     }
 
     final translatedItems = List.generate(category.items.length, (i) {
-      final t = rawItems[i] as List<dynamic>;
       final original = category.items[i];
       return MenuItem(
-        name: (t[0] as String?) ?? original.name,
-        description: (t[1] as String?) ?? original.description,
+        name: translatedNames[i],
+        description: translatedDescs[i],
         price: original.price,
         currency: original.currency,
+        unit: original.unit,
+        unitSize: original.unitSize,
       );
     });
 
-    return MenuCategory(name: translatedName, items: translatedItems);
+    return MenuCategory(name: translatedCategoryName, items: translatedItems);
   }
 }
