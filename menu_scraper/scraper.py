@@ -20,6 +20,7 @@ from menu_scraper.models.menu import (
 )
 from menu_scraper.processing.html_extractor import HtmlMenuExtractor
 from menu_scraper.processing.image_extractor import ImageMenuExtractor
+from menu_scraper.processing.menu_enhancer import MenuEnhancer
 from menu_scraper.processing.pdf_extractor import PdfMenuExtractor
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -68,8 +69,14 @@ def _find_subpage_links(sel: Selector, base_url: str) -> list[str]:
         clean_link = link.strip()
         if not clean_link:
             continue
+        # Skip non-http schemes and javascript/mailto/tel links
+        if clean_link.startswith(("mailto:", "tel:", "javascript:", "#")):
+            continue
 
         full_url = urljoin(base_url, clean_link)
+        parsed = urlparse(full_url)
+        if parsed.scheme not in ("http", "https"):
+            continue
         absolute_links.append(full_url)
 
     return absolute_links
@@ -152,6 +159,7 @@ async def scrape_menu(
     settings = get_settings()
     html_extractor = HtmlMenuExtractor(api_key=settings.openai_api_key)
     pdf_extractor = PdfMenuExtractor(api_key=settings.openai_api_key)
+    menu_enhancer = MenuEnhancer(api_key=settings.openai_api_key)
 
     # Если URL ведёт напрямую на PDF — скачиваем и обрабатываем без краулинга
     if _looks_like_pdf(url):
@@ -274,11 +282,12 @@ async def scrape_menu(
                 seen_item_names.add(item_key)
                 merged[key].append(item)
 
-    return [
+    result = [
         MenuCategory(name=name, items=items)
         for name, items in merged.items()
         if items
     ]
+    return await menu_enhancer.enhance(result)
 
 
 def _extract_pdf_links(sel: Selector, base_url: str) -> list[MediaFile]:
