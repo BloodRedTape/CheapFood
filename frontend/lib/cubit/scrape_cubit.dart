@@ -27,15 +27,20 @@ final class ScrapeSuccess extends ScrapeState {
   ScrapeSuccess withCurrency(String currency) =>
       ScrapeSuccess(categories: categories, exchangeRates: exchangeRates, selectedCurrency: currency, language: language);
 
-  /// Converts a price from the base currency to [selectedCurrency].
+  /// Returns null if selectedCurrency is '' (show original).
+  /// Otherwise converts [price] from [itemCurrency] to [selectedCurrency].
   double? convertPrice(double? price, String itemCurrency) {
     if (price == null) return null;
+    if (selectedCurrency.isEmpty) return price;
     if (itemCurrency == selectedCurrency) return price;
 
     final rates = exchangeRates.rates;
     final toBase = itemCurrency == exchangeRates.base ? price : price / (rates[itemCurrency] ?? 1.0);
     return toBase * (rates[selectedCurrency] ?? 1.0);
   }
+
+  /// The currency label to display next to the price.
+  String priceLabel(String itemCurrency) => selectedCurrency.isEmpty ? itemCurrency : selectedCurrency;
 }
 
 final class ScrapeFailure extends ScrapeState {
@@ -46,7 +51,7 @@ final class ScrapeFailure extends ScrapeState {
 class ScrapeCubit extends Cubit<ScrapeState> {
   static const String _backendUrl = 'http://localhost:8080';
 
-  String selectedCurrency = supportedCurrencies.first;
+  String selectedCurrency = '';
 
   ScrapeCubit() : super(ScrapeInitial());
 

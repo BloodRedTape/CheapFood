@@ -131,8 +131,11 @@ class _CurrencySelect extends StatelessWidget {
       onChanged: (value) {
         if (value != null) cubit.selectCurrency(value);
       },
-      options: options.map((c) => ShadOption(value: c, child: Text(c))).toList(),
-      selectedOptionBuilder: (context, value) => Text(value),
+      options: [
+        const ShadOption(value: '', child: Text('🌐 Original')),
+        ...options.map((c) => ShadOption(value: c, child: Text(c))),
+      ],
+      selectedOptionBuilder: (context, value) => Text(value.isEmpty ? '🌐' : value),
     );
   }
 }
@@ -280,7 +283,7 @@ class _MenuItemCard extends StatelessWidget {
                     const SizedBox(width: 6),
                   ],
                   if (convertedPrice != null)
-                    Text('${convertedPrice.toStringAsFixed(2)} ${state.selectedCurrency}', style: ShadTheme.of(context).textTheme.p.copyWith(fontWeight: FontWeight.bold)),
+                    Text('${convertedPrice.toStringAsFixed(2)} ${state.priceLabel(v.currency)}', style: ShadTheme.of(context).textTheme.p.copyWith(fontWeight: FontWeight.bold)),
                 ],
               );
             }).toList(),
