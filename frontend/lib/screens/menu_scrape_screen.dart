@@ -48,14 +48,12 @@ class _MenuScrapeScreenState extends State<MenuScrapeScreen> {
                 BlocBuilder<ScrapeCubit, ScrapeState>(
                   buildWhen: (prev, curr) =>
                       (prev is ScrapeLoading) != (curr is ScrapeLoading),
-                  builder: (context, state) {
-                    return ShadButton(
-                      onPressed: state is ScrapeLoading
-                          ? null
-                          : () => _submit(context),
-                      child: const Text('Найти'),
-                    );
-                  },
+                  builder: (context, state) => ShadButton(
+                    onPressed: state is ScrapeLoading
+                        ? null
+                        : () => _submit(context),
+                    child: const Text('Search'),
+                  ),
                 ),
               ],
             ),
@@ -67,10 +65,10 @@ class _MenuScrapeScreenState extends State<MenuScrapeScreen> {
                   ScrapeLoading() =>
                     const Center(child: CircularProgressIndicator()),
                   ScrapeFailure(:final message) => ShadAlert.destructive(
-                      title: const Text('Ошибка'),
+                      title: const Text('Error'),
                       description: Text(message),
                     ),
-                  ScrapeSuccess(:final items) => _MenuList(items: items),
+                  ScrapeSuccess() => _SuccessView(state: state),
                 },
               ),
             ),
@@ -81,61 +79,120 @@ class _MenuScrapeScreenState extends State<MenuScrapeScreen> {
   }
 }
 
-class _MenuList extends StatelessWidget {
-  final List<MenuItem> items;
+class _SuccessView extends StatefulWidget {
+  final ScrapeSuccess state;
 
-  const _MenuList({required this.items});
+  const _SuccessView({required this.state});
+
+  @override
+  State<_SuccessView> createState() => _SuccessViewState();
+}
+
+class _SuccessViewState extends State<_SuccessView> {
+  late final List<String> _currencies;
+  late final List<ShadOption<String>> _options;
+
+  @override
+  void initState() {
+    super.initState();
+    _currencies = ({
+      widget.state.exchangeRates.base,
+      ...widget.state.exchangeRates.rates.keys,
+    }).toList()
+      ..sort();
+    _options = _currencies
+        .map((c) => ShadOption(value: c, child: Text(c)))
+        .toList();
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Найдено блюд: ${items.length}',
-          style: ShadTheme.of(context).textTheme.muted,
-        ),
-        const SizedBox(height: 12),
-        Expanded(
-          child: ListView.separated(
-            itemCount: items.length,
-            separatorBuilder: (_, __) => const Divider(),
-            itemBuilder: (context, index) {
-              final item = items[index];
-              return ShadCard(
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            item.name,
-                            style: ShadTheme.of(context).textTheme.p,
-                          ),
-                          if (item.description != null)
-                            Text(
-                              item.description!,
-                              style: ShadTheme.of(context).textTheme.muted,
-                            ),
-                        ],
-                      ),
-                    ),
-                    if (item.price != null)
-                      Text(
-                        '${item.price!.toStringAsFixed(2)} ${item.currency}',
-                        style: ShadTheme.of(context)
-                            .textTheme
-                            .p
-                            ?.copyWith(fontWeight: FontWeight.bold),
-                      ),
-                  ],
+    return BlocBuilder<ScrapeCubit, ScrapeState>(
+      builder: (context, state) {
+        if (state is! ScrapeSuccess) return const SizedBox.shrink();
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Text(
+                  '${state.items.length} items found',
+                  style: ShadTheme.of(context).textTheme.muted,
                 ),
-              );
-            },
+                const Spacer(),
+                ShadSelect<String>(
+                  initialValue: state.selectedCurrency,
+                  onChanged: (value) {
+                    if (value != null) {
+                      context.read<ScrapeCubit>().selectCurrency(value);
+                    }
+                  },
+                  options: _options,
+                  selectedOptionBuilder: (context, value) => Text(value),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Expanded(
+              child: ListView.separated(
+                itemCount: state.items.length,
+                separatorBuilder: (_, __) => const Divider(),
+                itemBuilder: (context, index) {
+                  final item = state.items[index];
+                  return _MenuItemCard(
+                    item: item,
+                    convertedPrice: state.convertPrice(item.price, item.currency),
+                    displayCurrency: state.selectedCurrency,
+                  );
+                },
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _MenuItemCard extends StatelessWidget {
+  final MenuItem item;
+  final double? convertedPrice;
+  final String displayCurrency;
+
+  const _MenuItemCard({
+    required this.item,
+    required this.convertedPrice,
+    required this.displayCurrency,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ShadCard(
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(item.name, style: ShadTheme.of(context).textTheme.p),
+                if (item.description != null)
+                  Text(
+                    item.description!,
+                    style: ShadTheme.of(context).textTheme.muted,
+                  ),
+              ],
+            ),
           ),
-        ),
-      ],
+          if (convertedPrice != null)
+            Text(
+              '${convertedPrice!.toStringAsFixed(2)} $displayCurrency',
+              style: ShadTheme.of(context)
+                  .textTheme
+                  .p
+                  .copyWith(fontWeight: FontWeight.bold),
+            ),
+        ],
+      ),
     );
   }
 }

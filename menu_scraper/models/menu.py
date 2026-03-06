@@ -3,7 +3,30 @@ from __future__ import annotations
 from decimal import Decimal
 from enum import StrEnum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+_CURRENCY_SYMBOL_MAP: dict[str, str] = {
+    "$": "USD",
+    "€": "EUR",
+    "£": "GBP",
+    "¥": "JPY",
+    "₽": "RUB",
+    "₴": "UAH",
+    "₺": "TRY",
+    "₹": "INR",
+    "₩": "KRW",
+    "₪": "ILS",
+    "Kč": "CZK",
+    "zł": "PLN",
+    "kr": "SEK",
+    "Fr": "CHF",
+    "kn": "HRK",
+    "lei": "RON",
+    "лв": "BGN",
+    "Ft": "HUF",
+    "Nkr": "NOK",
+    "Dkr": "DKK",
+}
 
 
 class MenuSourceType(StrEnum):
@@ -24,6 +47,11 @@ class MenuItem(BaseModel):
     description: str | None = None
     price: Decimal | None = None
     currency: str = "USD"
+
+    @field_validator("currency", mode="before")
+    @classmethod
+    def normalize_currency(cls, v: str) -> str:
+        return _CURRENCY_SYMBOL_MAP.get(v, v).upper()
 
 
 class MenuResult(BaseModel):

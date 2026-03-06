@@ -12,7 +12,33 @@ final class ScrapeLoading extends ScrapeState {}
 
 final class ScrapeSuccess extends ScrapeState {
   final List<MenuItem> items;
-  ScrapeSuccess(this.items);
+  final ExchangeRates exchangeRates;
+  final String selectedCurrency;
+
+  ScrapeSuccess({
+    required this.items,
+    required this.exchangeRates,
+    required this.selectedCurrency,
+  });
+
+  ScrapeSuccess withCurrency(String currency) => ScrapeSuccess(
+        items: items,
+        exchangeRates: exchangeRates,
+        selectedCurrency: currency,
+      );
+
+  /// Converts a price from the base currency to [selectedCurrency].
+  double? convertPrice(double? price, String itemCurrency) {
+    if (price == null) return null;
+    if (itemCurrency == selectedCurrency) return price;
+
+    final rates = exchangeRates.rates;
+    // Convert item currency → base, then base → selected
+    final toBase = itemCurrency == exchangeRates.base
+        ? price
+        : price / (rates[itemCurrency] ?? 1.0);
+    return toBase * (rates[selectedCurrency] ?? 1.0);
+  }
 }
 
 final class ScrapeFailure extends ScrapeState {
@@ -39,16 +65,25 @@ class ScrapeCubit extends Cubit<ScrapeState> {
       );
 
       if (response.statusCode == 200) {
-        final List<dynamic> data = jsonDecode(response.body) as List<dynamic>;
-        final items = data
-            .map((e) => MenuItem.fromJson(e as Map<String, dynamic>))
-            .toList();
-        emit(ScrapeSuccess(items));
+        final scrapeResponse = ScrapeResponse.fromJson(
+            jsonDecode(response.body) as Map<String, dynamic>);
+        emit(ScrapeSuccess(
+          items: scrapeResponse.items,
+          exchangeRates: scrapeResponse.exchangeRates,
+          selectedCurrency: scrapeResponse.exchangeRates.base,
+        ));
       } else {
-        emit(ScrapeFailure('Ошибка сервера: ${response.statusCode}'));
+        emit(ScrapeFailure('Server error: ${response.statusCode}'));
       }
     } catch (e) {
-      emit(ScrapeFailure('Не удалось подключиться: $e'));
+      emit(ScrapeFailure('Connection failed: $e'));
+    }
+  }
+
+  void selectCurrency(String currency) {
+    final current = state;
+    if (current is ScrapeSuccess) {
+      emit(current.withCurrency(currency));
     }
   }
 }
