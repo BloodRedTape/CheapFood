@@ -1,6 +1,7 @@
 """Extract menu items from cleaned HTML text using Gemini."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 
@@ -33,9 +34,12 @@ class MenuItemList(BaseModel):
 class GeminiMenuExtractor:
     """Extracts menu items by sending cleaned text to Gemini."""
 
-    def __init__(self, api_key: str, model: str = "gemini-2.5-flash") -> None:
+    def __init__(self, api_key: str, model: str = "gemini-2.5-flash", rpm: int = 5) -> None:
         self._client: genai.Client = genai.Client(api_key=api_key)
         self._model: str = model
+        self._semaphore: asyncio.Semaphore = asyncio.Semaphore(1)
+        self._interval: float = 60.0 / rpm
+        self._last_call: float = 0.0
 
     async def extract(self, clean_text: str, log_path: Path | None = None) -> list[MenuItem]:
         """Send cleaned page text to Gemini and parse structured response.
@@ -51,14 +55,21 @@ class GeminiMenuExtractor:
         prompt: str = f"{SYSTEM_PROMPT}\n\n---\n\n{clean_text}"
 
         try:
-            response = await self._client.aio.models.generate_content(
-                model=self._model,
-                contents=prompt,
-                config={
-                    "response_mime_type": "application/json",
-                    "response_schema": MenuItemList,  # Передаем класс Pydantic напрямую
-                },
-            )
+            async with self._semaphore:
+                now: float = asyncio.get_event_loop().time()
+                wait: float = self._interval - (now - self._last_call)
+                if wait > 0:
+                    logger.info("Rate limit: waiting %.1fs", wait)
+                    await asyncio.sleep(wait)
+                response = await self._client.aio.models.generate_content(
+                    model=self._model,
+                    contents=prompt,
+                    config={
+                        "response_mime_type": "application/json",
+                        "response_schema": MenuItemList,
+                    },
+                )
+                self._last_call = asyncio.get_event_loop().time()
             response_text: str = response.text or ""
 
             logger.info("Gemini response %s", response_text)
