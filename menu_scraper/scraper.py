@@ -18,8 +18,8 @@ from menu_scraper.models.menu import (
     MenuCategory,
     MenuSourceType,
 )
-from menu_scraper.processing.html_cleaner import clean_html
 from menu_scraper.processing.html_extractor import HtmlMenuExtractor
+from menu_scraper.processing.image_extractor import ImageMenuExtractor
 from menu_scraper.processing.pdf_extractor import PdfMenuExtractor
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -63,21 +63,21 @@ def _same_domain(url: str, base_url: str) -> bool:
 
 def _find_subpage_links(sel: Selector, base_url: str) -> list[str]:
     absolute_links: list[str] = []
-    
+
     for link in sel.css("a::attr(href)").getall():
         clean_link = link.strip()
         if not clean_link:
             continue
-            
+
         full_url = urljoin(base_url, clean_link)
         absolute_links.append(full_url)
-        
+
     return absolute_links
 
 async def _fetch_page(
     client: httpx.AsyncClient,
     url: str,
-    site_dir: Path,
+    scraper_dir: Path,
     depth: int,
 ) -> tuple[str, str] | None:
     """Fetch a single page and save it to disk. Returns (html, resolved_url) or None."""
@@ -94,7 +94,7 @@ async def _fetch_page(
 
     html: str = response.text
     filename: str = _url_to_filename(str(response.url))
-    local_path: Path = site_dir / filename
+    local_path: Path = scraper_dir / filename
     local_path.write_text(html, encoding="utf-8")
     logger.info("Saved page [depth=%d]: %s -> %s", depth, response.url, filename)
 
@@ -104,7 +104,7 @@ async def _fetch_page(
 async def _download_pdf(
     client: httpx.AsyncClient,
     url: str,
-    site_dir: Path,
+    pdf_dir: Path,
 ) -> tuple[bytes, Path] | None:
     """Download a PDF file and save to disk. Returns (pdf_bytes, local_path) or None."""
     try:
@@ -124,7 +124,7 @@ async def _download_pdf(
     stem: str = parsed.path.strip("/").replace("/", "_").removesuffix(".pdf") or "doc"
     safe_stem: str = re.sub(r"[^a-zA-Z0-9_]", "", stem)[:60]
     filename: str = f"{safe_stem}_{url_hash}.pdf"
-    local_path: Path = site_dir / filename
+    local_path: Path = pdf_dir / filename
     local_path.write_bytes(pdf_data)
     logger.info("Saved PDF: %s -> %s (%d bytes)", url, filename, len(pdf_data))
 
@@ -137,11 +137,17 @@ async def scrape_menu(
     download_media: bool = True,
 ) -> list[MenuCategory]:
     site_dir: Path = RUN_DIR / _url_to_dirname(url)
-    
+
     # Асинхронная очистка и создание директорий
     if site_dir.exists():
         await asyncio.to_thread(shutil.rmtree, site_dir)
-    await asyncio.to_thread(site_dir.mkdir, parents=True, exist_ok=True)
+
+    scraper_dir: Path = site_dir / "scraper"
+    html_extractor_dir: Path = site_dir / "html_extractor"
+    pdf_extractor_dir: Path = site_dir / "pdf_extractor"
+
+    for d in (scraper_dir, html_extractor_dir, pdf_extractor_dir):
+        await asyncio.to_thread(d.mkdir, parents=True, exist_ok=True)
 
     settings = get_settings()
     html_extractor = HtmlMenuExtractor(api_key=settings.openai_api_key)
@@ -149,26 +155,25 @@ async def scrape_menu(
 
     visited: set[str] = {url}
     current_urls: list[str] = [url]
-    
+
     all_media: list[MediaFile] = []
-    # (clean_text, html_filename) для последующей отправки в LLM
+    # (html, html_filename) для последующей отправки в LLM
     pending_texts: list[tuple[str, str]] = []
 
     # Вспомогательная функция для обработки одного URL (без LLM)
     async def _process_url(client: httpx.AsyncClient, current_url: str, depth: int):
-        result = await _fetch_page(client, current_url, site_dir, depth)
+        result = await _fetch_page(client, current_url, scraper_dir, depth)
         if not result:
             return None
 
         html, page_url = result
         sel = Selector(text=html)
-        clean_text = clean_html(html)
         html_filename: str = _url_to_filename(page_url)
 
         media = _extract_pdf_links(sel, page_url) + _extract_menu_images(sel, page_url)
         sub_links = _find_subpage_links(sel, page_url) if depth < MAX_DEPTH else []
 
-        return clean_text, html_filename, media, sub_links
+        return html, html_filename, media, sub_links
 
     async with httpx.AsyncClient(
         follow_redirects=True,
@@ -189,9 +194,9 @@ async def scrape_menu(
                 if not res:
                     continue
 
-                clean_text, html_filename, media, links = res
-                if clean_text.strip():
-                    pending_texts.append((clean_text, html_filename))
+                html, html_filename, media, links = res
+                if html.strip():
+                    pending_texts.append((html, html_filename))
                 all_media.extend(media)
 
                 # Собираем уникальные ссылки для следующего уровня
@@ -221,7 +226,7 @@ async def scrape_menu(
             timeout=float(timeout),
             headers={"User-Agent": USER_AGENT},
         ) as pdf_client:
-            pdf_tasks = [_download_pdf(pdf_client, m.original_url, site_dir) for m in pdf_media]
+            pdf_tasks = [_download_pdf(pdf_client, m.original_url, pdf_extractor_dir) for m in pdf_media]
             pdf_results = await asyncio.gather(*pdf_tasks)
 
         for media_file, pdf_result in zip(pdf_media, pdf_results):
@@ -229,59 +234,18 @@ async def scrape_menu(
                 continue
             pdf_data, local_path = pdf_result
             media_file.local_path = str(local_path)
-            log_path = local_path.with_suffix(".llm.txt")
             logger.info("LLM: processing PDF %s", media_file.original_url)
             items = await pdf_extractor.extract(
-                pdf_data, source_url=media_file.original_url, log_path=log_path,
+                pdf_data, source_url=media_file.original_url, log_dir=pdf_extractor_dir,
             )
             logger.info("LLM: done PDF %s — found %d categories", media_file.original_url, len(items))
             all_categories.extend(items)
 
-    # Батчинг текстов для LLM: объединяем маленькие тексты в один запрос
-    BATCH_CHAR_LIMIT: int = 32000
-    batch_texts: list[tuple[str, str]] = []  # (clean_text, html_filename)
-    batch_size: int = 0
-
-    async def _flush_batch() -> None:
-        nonlocal batch_texts, batch_size
-        if not batch_texts:
-            return
-        if len(batch_texts) == 1:
-            text, fname = batch_texts[0]
-            log_path = site_dir / fname.replace(".html", ".llm.txt")
-            logger.info("LLM: processing HTML %s", fname)
-            items = await html_extractor.extract(text, log_path=log_path)
-            logger.info("LLM: done HTML %s — found %d categories", fname, len(items))
-        else:
-            names = [f for _, f in batch_texts]
-            logger.info("LLM: processing HTML batch: %s", ", ".join(names))
-            combined = "\n\n---PAGE BREAK---\n\n".join(t for t, _ in batch_texts)
-            log_name = batch_texts[0][1].replace(".html", "") + "_batch.llm.txt"
-            log_path = site_dir / log_name
-            items = await html_extractor.extract(combined, log_path=log_path)
-            logger.info("LLM: done HTML batch — found %d categories", len(items))
+    for html, html_filename in pending_texts:
+        logger.info("LLM: processing HTML %s", html_filename)
+        items = await html_extractor.extract(html, filename=html_filename, log_dir=html_extractor_dir)
+        logger.info("LLM: done HTML %s — found %d categories", html_filename, len(items))
         all_categories.extend(items)
-        batch_texts = []
-        batch_size = 0
-
-    for clean_text, html_filename in pending_texts:
-        text_len = len(clean_text)
-        # Если текст сам по себе большой — отправляем отдельно
-        if text_len >= BATCH_CHAR_LIMIT:
-            await _flush_batch()
-            log_path = site_dir / html_filename.replace(".html", ".llm.txt")
-            logger.info("LLM: processing HTML %s (%d chars)", html_filename, text_len)
-            items = await html_extractor.extract(clean_text, log_path=log_path)
-            logger.info("LLM: done HTML %s — found %d categories", html_filename, len(items))
-            all_categories.extend(items)
-            continue
-        # Если добавление переполнит батч — сначала сбросим
-        if batch_size + text_len > BATCH_CHAR_LIMIT:
-            await _flush_batch()
-        batch_texts.append((clean_text, html_filename))
-        batch_size += text_len
-
-    await _flush_batch()
 
     # Слияние категорий с одинаковым именем + дедупликация блюд по имени
     merged: dict[str | None, list] = {}
