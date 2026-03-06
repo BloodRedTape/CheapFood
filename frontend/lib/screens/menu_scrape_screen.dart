@@ -45,8 +45,8 @@ class _MenuScrapeScreenState extends State<MenuScrapeScreen> {
               children: [
                 ShadButton.ghost(onPressed: () => Navigator.of(context).pop(), child: const Icon(Icons.arrow_back)),
                 const SizedBox(width: 8),
-                Text(title, style: ShadTheme.of(context).textTheme.h2),
-                const Spacer(),
+                Flexible(child: Text(title, style: ShadTheme.of(context).textTheme.h2, overflow: TextOverflow.ellipsis)),
+                const SizedBox(width: 8),
                 ShadSelect<String>(
                   initialValue: _selectedLanguage,
                   onChanged: (value) {
