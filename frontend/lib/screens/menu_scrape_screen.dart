@@ -45,7 +45,7 @@ class _MenuScrapeScreenState extends State<MenuScrapeScreen> {
           children: [
             Row(
               children: [
-                Text('CheapFood', style: ShadTheme.of(context).textTheme.h2),
+                Text('Stupid Me', style: ShadTheme.of(context).textTheme.h2),
                 const Spacer(),
                 ShadSelect<String>(
                   initialValue: _selectedLanguage,

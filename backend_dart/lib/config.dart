@@ -33,8 +33,8 @@ void loadDotEnv() {
 String _getEnv(String key) =>
     _env[key] ?? Platform.environment[key] ?? '';
 
-String get geminiApiKey {
-  final key = _getEnv('GEMINI_API_KEY');
-  if (key.isEmpty) throw StateError('GEMINI_API_KEY is not set');
+String get openaiApiKey {
+  final key = _getEnv('OPENAI_API_KEY');
+  if (key.isEmpty) throw StateError('OPENAI_API_KEY is not set');
   return key;
 }
