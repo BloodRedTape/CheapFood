@@ -15,7 +15,11 @@ class MenuItem {
     return MenuItem(
       name: json['name'] as String,
       description: json['description'] as String?,
-      price: (json['price'] as num?)?.toDouble(),
+      price: switch (json['price']) {
+        num n => n.toDouble(),
+        String s => double.tryParse(s),
+        _ => null,
+      },
       currency: (json['currency'] as String?) ?? 'USD',
     );
   }
