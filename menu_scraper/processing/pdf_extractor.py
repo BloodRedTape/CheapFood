@@ -11,28 +11,34 @@ from google.genai.errors import APIError
 from google.genai.types import Blob, Part
 from pydantic import BaseModel, Field
 
-from menu_scraper.models.menu import MenuItem
+from menu_scraper.models.menu import MenuCategory
 
 logger: logging.Logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT: str = """You are a menu parser. You receive a PDF file from a restaurant website.
-Extract ALL menu items you can find. For each item return:
+Extract ALL menu items grouped by category. For each category return:
+- name: category name as written (e.g. "Starters", "Main Course"), or null if no category is apparent
+- items: list of dishes in that category
+
+For each item return:
 - name: dish name exactly as written
 - description: dish description if present, null otherwise
 - price: numeric price if present, null otherwise
 - currency: ISO currency code (USD, EUR, ILS, GBP, etc.), default USD
 
 Rules:
+- Group items by the section headers/titles found in the PDF
+- If all items belong to no clear category, return a single category with name null
 - Extract every item that looks like a menu dish, even if it has no price
-- Keep original dish names, do not translate
+- Keep original dish names and category names, do not translate
 - If price has comma as decimal separator, convert to dot (e.g. 12,50 -> 12.50)
 - If price is missing or not listed, set price to null
 - If no items found, return empty list
-- Do NOT invent items that are not in the text"""
+- Do NOT invent items or categories that are not in the text"""
 
 
-class MenuItemList(BaseModel):
-    items: list[MenuItem] = Field(default_factory=list)
+class MenuCategoryList(BaseModel):
+    categories: list[MenuCategory] = Field(default_factory=list)
 
 
 class PdfMenuExtractor:
@@ -55,7 +61,7 @@ class PdfMenuExtractor:
 
     async def extract(
         self, pdf_data: bytes, source_url: str, log_path: Path | None = None,
-    ) -> list[MenuItem]:
+    ) -> list[MenuCategory]:
         """Send PDF binary data to Gemini for menu extraction."""
         logger.info("Extracting menu from PDF: %s (%d bytes)", source_url, len(pdf_data))
         source_label: str = f"pdf:{source_url}"
@@ -77,20 +83,21 @@ class PdfMenuExtractor:
                         contents=parts,
                         config={
                             "response_mime_type": "application/json",
-                            "response_schema": MenuItemList,
+                            "response_schema": MenuCategoryList,
                         },
                     )
                     self._last_call = asyncio.get_event_loop().time()
 
                 response_text: str = response.text or ""
                 logger.info("Gemini response for %s: %s", source_label, response_text)
-                result: MenuItemList = MenuItemList.model_validate_json(response_text)
-                logger.info("Gemini extracted %d items from %s", len(result.items), source_label)
+                result: MenuCategoryList = MenuCategoryList.model_validate_json(response_text)
+                total = sum(len(c.items) for c in result.categories)
+                logger.info("Gemini extracted %d items in %d categories from %s", total, len(result.categories), source_label)
 
                 if log_path is not None:
                     _save_log(log_path, source_label, response_text)
 
-                return result.items
+                return result.categories
 
             except APIError as exc:
                 if _is_daily_quota(exc):

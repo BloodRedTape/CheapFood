@@ -24,9 +24,9 @@ Router buildRouter({
     final language = requestJson['language'] as String?;
 
     // Always scrape/cache in original language
-    var items = menuCache.readOriginal(url);
+    var categories = menuCache.readOriginal(url);
 
-    if (items == null) {
+    if (categories == null) {
       final scraperResponse = await http.post(
         Uri.parse('$scraperUrl/scrape'),
         headers: {'Content-Type': 'application/json'},
@@ -41,25 +41,25 @@ Router buildRouter({
         );
       }
 
-      final rawItems = jsonDecode(scraperResponse.body) as List<dynamic>;
-      items = rawItems
-          .map((e) => MenuItem.fromJson(e as Map<String, dynamic>))
+      final rawCategories = jsonDecode(scraperResponse.body) as List<dynamic>;
+      categories = rawCategories
+          .map((e) => MenuCategory.fromJson(e as Map<String, dynamic>))
           .toList();
-      menuCache.writeOriginal(url, items);
+      menuCache.writeOriginal(url, categories);
     }
 
     // Translate if requested
     if (language != null && language.isNotEmpty) {
       final cached = menuCache.readTranslated(url, language);
       if (cached != null) {
-        items = cached;
+        categories = cached;
       } else {
         try {
-          items = await translationService.translate(
+          categories = await translationService.translate(
             language: language,
-            items: items,
+            categories: categories,
           );
-          menuCache.writeTranslated(url, language, items);
+          menuCache.writeTranslated(url, language, categories);
         } catch (e, st) {
           print('Translation error: $e\n$st');
           return Response.internalServerError(
@@ -70,7 +70,8 @@ Router buildRouter({
       }
     }
 
-    final base = items
+    final allItems = categories.expand((c) => c.items).toList();
+    final base = allItems
         .firstWhere(
           (i) => i.currency.isNotEmpty,
           orElse: () => const MenuItem(name: '', currency: 'USD'),
@@ -97,7 +98,7 @@ Router buildRouter({
     );
 
     final scrapeResponse = ScrapeResponse(
-      items: items,
+      categories: categories,
       exchangeRates: filteredExchangeRates,
     );
 

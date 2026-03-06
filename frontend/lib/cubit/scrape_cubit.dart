@@ -11,20 +11,20 @@ final class ScrapeInitial extends ScrapeState {}
 final class ScrapeLoading extends ScrapeState {}
 
 final class ScrapeSuccess extends ScrapeState {
-  final List<MenuItem> items;
+  final List<MenuCategory> categories;
   final ExchangeRates exchangeRates;
   final String selectedCurrency;
   final String language;
 
   ScrapeSuccess({
-    required this.items,
+    required this.categories,
     required this.exchangeRates,
     required this.selectedCurrency,
     required this.language,
   });
 
   ScrapeSuccess withCurrency(String currency) => ScrapeSuccess(
-        items: items,
+        categories: categories,
         exchangeRates: exchangeRates,
         selectedCurrency: currency,
         language: language,
@@ -36,7 +36,6 @@ final class ScrapeSuccess extends ScrapeState {
     if (itemCurrency == selectedCurrency) return price;
 
     final rates = exchangeRates.rates;
-    // Convert item currency → base, then base → selected
     final toBase = itemCurrency == exchangeRates.base
         ? price
         : price / (rates[itemCurrency] ?? 1.0);
@@ -73,7 +72,7 @@ class ScrapeCubit extends Cubit<ScrapeState> {
         final scrapeResponse = ScrapeResponse.fromJson(
             jsonDecode(response.body) as Map<String, dynamic>);
         emit(ScrapeSuccess(
-          items: scrapeResponse.items,
+          categories: scrapeResponse.categories,
           exchangeRates: scrapeResponse.exchangeRates,
           selectedCurrency: selectedCurrency,
           language: language ?? '',

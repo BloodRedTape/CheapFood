@@ -33,27 +33,30 @@ class MenuCache {
     return File('${dir.path}${Platform.pathSeparator}$name.json');
   }
 
-  List<MenuItem>? _readFile(File file) {
+  List<MenuCategory>? _readFile(File file) {
     if (!file.existsSync()) return null;
     print('Menu cache hit: ${file.path}');
     final raw = jsonDecode(file.readAsStringSync()) as List<dynamic>;
-    return raw.map((e) => MenuItem.fromJson(e as Map<String, dynamic>)).toList();
+    return raw
+        .map((e) => MenuCategory.fromJson(e as Map<String, dynamic>))
+        .toList();
   }
 
-  void _writeFile(File file, List<MenuItem> items) {
-    file.writeAsStringSync(jsonEncode(items.map((e) => e.toJson()).toList()));
+  void _writeFile(File file, List<MenuCategory> categories) {
+    file.writeAsStringSync(
+        jsonEncode(categories.map((e) => e.toJson()).toList()));
     print('Menu cached: ${file.path}');
   }
 
-  List<MenuItem>? readOriginal(String url) =>
+  List<MenuCategory>? readOriginal(String url) =>
       _readFile(_fileFor(url, 'original'));
 
-  void writeOriginal(String url, List<MenuItem> items) =>
-      _writeFile(_fileFor(url, 'original'), items);
+  void writeOriginal(String url, List<MenuCategory> categories) =>
+      _writeFile(_fileFor(url, 'original'), categories);
 
-  List<MenuItem>? readTranslated(String url, String language) =>
+  List<MenuCategory>? readTranslated(String url, String language) =>
       _readFile(_fileFor(url, language));
 
-  void writeTranslated(String url, String language, List<MenuItem> items) =>
-      _writeFile(_fileFor(url, language), items);
+  void writeTranslated(String url, String language, List<MenuCategory> categories) =>
+      _writeFile(_fileFor(url, language), categories);
 }

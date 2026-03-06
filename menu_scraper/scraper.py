@@ -15,7 +15,7 @@ from parsel import Selector
 from menu_scraper.config import get_settings
 from menu_scraper.models.menu import (
     MediaFile,
-    MenuItem,
+    MenuCategory,
     MenuSourceType,
 )
 from menu_scraper.processing.html_cleaner import clean_html
@@ -135,7 +135,7 @@ async def scrape_menu(
     url: str,
     timeout: int = 30,
     download_media: bool = True,
-) -> list[MenuItem]:
+) -> list[MenuCategory]:
     site_dir: Path = RUN_DIR / _url_to_dirname(url)
     
     # Асинхронная очистка и создание директорий
@@ -202,7 +202,7 @@ async def scrape_menu(
 
             current_urls = list(next_urls)
 
-    all_items: list[MenuItem] = []
+    all_categories: list[MenuCategory] = []
 
     # Дедупликация медиа перед обработкой
     seen_media_urls: set[str] = set()
@@ -234,8 +234,8 @@ async def scrape_menu(
             items = await pdf_extractor.extract(
                 pdf_data, source_url=media_file.original_url, log_path=log_path,
             )
-            logger.info("LLM: done PDF %s — found %d items", media_file.original_url, len(items))
-            all_items.extend(items)
+            logger.info("LLM: done PDF %s — found %d categories", media_file.original_url, len(items))
+            all_categories.extend(items)
 
     # Батчинг текстов для LLM: объединяем маленькие тексты в один запрос
     BATCH_CHAR_LIMIT: int = 32000
@@ -251,7 +251,7 @@ async def scrape_menu(
             log_path = site_dir / fname.replace(".html", ".llm.txt")
             logger.info("LLM: processing HTML %s", fname)
             items = await html_extractor.extract(text, log_path=log_path)
-            logger.info("LLM: done HTML %s — found %d items", fname, len(items))
+            logger.info("LLM: done HTML %s — found %d categories", fname, len(items))
         else:
             names = [f for _, f in batch_texts]
             logger.info("LLM: processing HTML batch: %s", ", ".join(names))
@@ -259,8 +259,8 @@ async def scrape_menu(
             log_name = batch_texts[0][1].replace(".html", "") + "_batch.llm.txt"
             log_path = site_dir / log_name
             items = await html_extractor.extract(combined, log_path=log_path)
-            logger.info("LLM: done HTML batch — found %d items", len(items))
-        all_items.extend(items)
+            logger.info("LLM: done HTML batch — found %d categories", len(items))
+        all_categories.extend(items)
         batch_texts = []
         batch_size = 0
 
@@ -272,8 +272,8 @@ async def scrape_menu(
             log_path = site_dir / html_filename.replace(".html", ".llm.txt")
             logger.info("LLM: processing HTML %s (%d chars)", html_filename, text_len)
             items = await html_extractor.extract(clean_text, log_path=log_path)
-            logger.info("LLM: done HTML %s — found %d items", html_filename, len(items))
-            all_items.extend(items)
+            logger.info("LLM: done HTML %s — found %d categories", html_filename, len(items))
+            all_categories.extend(items)
             continue
         # Если добавление переполнит батч — сначала сбросим
         if batch_size + text_len > BATCH_CHAR_LIMIT:
@@ -283,16 +283,24 @@ async def scrape_menu(
 
     await _flush_batch()
 
-    # Дедупликация
-    seen_names = set()
-    unique_items = []
-    for item in all_items:
-        key = item.name.lower().strip()
-        if key not in seen_names:
-            seen_names.add(key)
-            unique_items.append(item)
+    # Слияние категорий с одинаковым именем + дедупликация блюд по имени
+    merged: dict[str | None, list] = {}
+    seen_item_names: set[str] = set()
+    for category in all_categories:
+        key = category.name.strip().lower() if category.name else None
+        if key not in merged:
+            merged[key] = []
+        for item in category.items:
+            item_key = item.name.lower().strip()
+            if item_key not in seen_item_names:
+                seen_item_names.add(item_key)
+                merged[key].append(item)
 
-    return unique_items
+    return [
+        MenuCategory(name=name, items=items)
+        for name, items in merged.items()
+        if items
+    ]
 
 
 def _extract_pdf_links(sel: Selector, base_url: str) -> list[MediaFile]:

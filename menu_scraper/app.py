@@ -4,7 +4,7 @@ import logging
 
 from fastapi import FastAPI
 
-from menu_scraper.models.menu import MenuItem
+from menu_scraper.models.menu import MenuCategory
 from menu_scraper.models.requests import ScrapeRequest
 from menu_scraper.scraper import scrape_menu
 
@@ -17,8 +17,8 @@ app: FastAPI = FastAPI(
 )
 
 
-@app.post("/scrape", response_model=list[MenuItem])
-async def scrape_endpoint(request: ScrapeRequest) -> list[MenuItem]:
+@app.post("/scrape", response_model=list[MenuCategory])
+async def scrape_endpoint(request: ScrapeRequest) -> list[MenuCategory]:
     """Scrape a restaurant menu from the given URL."""
     return await scrape_menu(
         url=str(request.url),

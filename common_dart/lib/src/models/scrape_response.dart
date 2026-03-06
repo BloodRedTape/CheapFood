@@ -1,17 +1,17 @@
 import 'exchange_rates.dart';
-import 'menu_item.dart';
+import 'menu_category.dart';
 
 class ScrapeResponse {
-  final List<MenuItem> items;
+  final List<MenuCategory> categories;
   final ExchangeRates exchangeRates;
 
-  const ScrapeResponse({required this.items, required this.exchangeRates});
+  const ScrapeResponse({required this.categories, required this.exchangeRates});
 
   factory ScrapeResponse.fromJson(Map<String, dynamic> json) {
-    final rawItems = json['items'] as List<dynamic>;
+    final rawCategories = json['categories'] as List<dynamic>;
     return ScrapeResponse(
-      items: rawItems
-          .map((e) => MenuItem.fromJson(e as Map<String, dynamic>))
+      categories: rawCategories
+          .map((e) => MenuCategory.fromJson(e as Map<String, dynamic>))
           .toList(),
       exchangeRates: ExchangeRates.fromJson(
           json['exchange_rates'] as Map<String, dynamic>),
@@ -19,7 +19,7 @@ class ScrapeResponse {
   }
 
   Map<String, dynamic> toJson() => {
-        'items': items.map((e) => e.toJson()).toList(),
+        'categories': categories.map((e) => e.toJson()).toList(),
         'exchange_rates': exchangeRates.toJson(),
       };
 }

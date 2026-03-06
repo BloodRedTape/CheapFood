@@ -9,10 +9,23 @@ const String _openaiApiUrl = 'https://api.openai.com/v1/chat/completions';
 const String _openaiModel = 'gpt-5-mini';
 
 class TranslationService {
-  /// Returns [items] translated to [language] (BCP-47 tag, e.g. 'en', 'ru').
-  Future<List<MenuItem>> translate({required String language, required List<MenuItem> items}) async {
-    print('Translating ${items.length} items to $language via OpenAI $_openaiModel');
-    return _callOpenAI(items: items, language: language);
+  /// Returns [categories] translated to [language] (BCP-47 tag, e.g. 'en', 'ru').
+  Future<List<MenuCategory>> translate({
+    required String language,
+    required List<MenuCategory> categories,
+  }) async {
+    // Flatten all items to translate in one batch
+    final allItems = categories.expand((c) => c.items).toList();
+    print('Translating ${allItems.length} items to $language via OpenAI $_openaiModel');
+    final translatedItems = await _callOpenAI(items: allItems, language: language);
+
+    // Rebuild categories with translated items
+    int offset = 0;
+    return categories.map((c) {
+      final slice = translatedItems.sublist(offset, offset + c.items.length);
+      offset += c.items.length;
+      return MenuCategory(name: c.name, items: slice);
+    }).toList();
   }
 
   Future<List<MenuItem>> _callOpenAI({required List<MenuItem> items, required String language}) async {
@@ -62,14 +75,12 @@ ${jsonEncode(input)}
 
     final text = choice['message']['content'] as String;
 
-    // response_format json_object wraps our array — unwrap if needed
     print('OpenAI raw content: $text');
     dynamic parsed = jsonDecode(text);
     List<dynamic> translated;
     if (parsed is List) {
       translated = parsed;
     } else if (parsed is Map) {
-      // find first value that is a List
       final listValue = parsed.values.whereType<List>().firstOrNull;
       if (listValue != null) {
         translated = listValue;

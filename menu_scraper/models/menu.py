@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from decimal import Decimal
 from enum import StrEnum
 
@@ -54,9 +52,14 @@ class MenuItem(BaseModel):
         return _CURRENCY_SYMBOL_MAP.get(v, v).upper()
 
 
+class MenuCategory(BaseModel):
+    name: str | None = None
+    items: list[MenuItem] = Field(default_factory=list)
+
+
 class MenuResult(BaseModel):
     url: str
     restaurant_name: str | None = None
-    items: list[MenuItem] = Field(default_factory=list)
+    categories: list[MenuCategory] = Field(default_factory=list)
     source_type: MenuSourceType = MenuSourceType.HTML_TEXT
     media_files: list[MediaFile] = Field(default_factory=list)

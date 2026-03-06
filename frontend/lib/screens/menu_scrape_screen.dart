@@ -114,39 +114,103 @@ class _CurrencySelect extends StatelessWidget {
   }
 }
 
-class _SuccessView extends StatefulWidget {
+class _SuccessView extends StatelessWidget {
   final ScrapeSuccess state;
 
   const _SuccessView({required this.state});
 
   @override
-  State<_SuccessView> createState() => _SuccessViewState();
-}
-
-class _SuccessViewState extends State<_SuccessView> {
-  @override
   Widget build(BuildContext context) {
     return BlocBuilder<ScrapeCubit, ScrapeState>(
-      builder: (context, state) {
-        if (state is! ScrapeSuccess) return const SizedBox.shrink();
+      builder: (context, cubitState) {
+        if (cubitState is! ScrapeSuccess) return const SizedBox.shrink();
+        final categories = cubitState.categories;
+        final totalItems = categories.fold(0, (sum, c) => sum + c.items.length);
+
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('${state.items.length} items found', style: ShadTheme.of(context).textTheme.muted),
+            Text('$totalItems items found', style: ShadTheme.of(context).textTheme.muted),
             const SizedBox(height: 12),
             Expanded(
-              child: ListView.separated(
-                itemCount: state.items.length,
-                separatorBuilder: (_, __) => const Divider(),
-                itemBuilder: (context, index) {
-                  final item = state.items[index];
-                  return _MenuItemCard(item: item, convertedPrice: state.convertPrice(item.price, item.currency), displayCurrency: state.selectedCurrency);
-                },
-              ),
+              child: _CategoryTabView(state: cubitState, categories: categories),
             ),
           ],
         );
       },
+    );
+  }
+}
+
+class _CategoryTabView extends StatefulWidget {
+  final ScrapeSuccess state;
+  final List<MenuCategory> categories;
+
+  const _CategoryTabView({required this.state, required this.categories});
+
+  @override
+  State<_CategoryTabView> createState() => _CategoryTabViewState();
+}
+
+class _CategoryTabViewState extends State<_CategoryTabView> with SingleTickerProviderStateMixin {
+  late TabController _tabController;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: widget.categories.length, vsync: this);
+  }
+
+  @override
+  void didUpdateWidget(_CategoryTabView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.categories.length != widget.categories.length) {
+      _tabController.dispose();
+      _tabController = TabController(length: widget.categories.length, vsync: this);
+    }
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.categories.isEmpty) return const SizedBox.shrink();
+
+    return Column(
+      children: [
+        TabBar(
+          controller: _tabController,
+          isScrollable: true,
+          tabAlignment: TabAlignment.start,
+          tabs: widget.categories
+              .map((c) => Tab(text: c.name ?? 'Menu'))
+              .toList(),
+        ),
+        Expanded(
+          child: TabBarView(
+            controller: _tabController,
+            children: widget.categories.map((category) {
+              return ListView.separated(
+                padding: const EdgeInsets.only(top: 12),
+                itemCount: category.items.length,
+                separatorBuilder: (_, __) => const Divider(),
+                itemBuilder: (context, index) {
+                  final item = category.items[index];
+                  return _MenuItemCard(
+                    item: item,
+                    convertedPrice: widget.state.convertPrice(item.price, item.currency),
+                    displayCurrency: widget.state.selectedCurrency,
+                  );
+                },
+              );
+            }).toList(),
+          ),
+        ),
+      ],
     );
   }
 }
