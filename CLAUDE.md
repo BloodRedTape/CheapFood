@@ -13,7 +13,9 @@
 - Twisted requires SelectorEventLoop — solved via loop factory in `__main__.py`
 - Playwright support planned but currently disabled
 - OCR stub exists, will use Gemini Vision API later
-- Simplified data model: flat `list[MenuItem]`, no categories/tags/wrapper objects
+- Data model: `MenuResult` → `list[MenuCategory]` → `list[MenuItem]` → `list[MenuItemVariation]`
+- Price, currency, unit, unit_size live on `MenuItemVariation`, not on `MenuItem`
+- Most items have one variation; multiple variations when item is offered in different sizes/prices
 - `Decimal` price fields serialize to JSON strings — Dart parses both `num` and `String`
 
 ## Python
@@ -39,7 +41,10 @@
 - Use `.env` for configuration (pydantic-settings with CHEAPFOOD_ prefix)
 
 ## Common Dart
-- common models between flutter frontend and dart backend should be in common_dart
+- Shared models between flutter frontend and dart backend live in `common_dart`
+- Models: `MenuItem`, `MenuItemVariation`, `MenuCategory`, `ScrapeRequest`, `ScrapeResponse`, `ExchangeRates`
+- `MenuItem` has `name`, `description`, `variations: List<MenuItemVariation>`
+- `MenuItemVariation` has `price`, `currency`, `unit`, `unitSize`
 
 ## Frontend UI
 - Frontend should be in a mobile app style

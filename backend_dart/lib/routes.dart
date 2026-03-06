@@ -73,11 +73,11 @@ Router buildRouter({
       }
     }
 
-    final allItems = categories.expand((c) => c.items).toList();
-    final base = allItems
+    final allVariations = categories.expand((c) => c.items).expand((i) => i.variations).toList();
+    final base = allVariations
         .firstWhere(
-          (i) => i.currency.isNotEmpty,
-          orElse: () => const MenuItem(name: '', currency: 'USD'),
+          (v) => v.currency.isNotEmpty,
+          orElse: () => const MenuItemVariation(currency: 'USD'),
         )
         .currency;
 

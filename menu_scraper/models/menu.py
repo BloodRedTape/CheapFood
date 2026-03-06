@@ -40,9 +40,7 @@ class MediaFile(BaseModel):
     ocr_text: str | None = None
 
 
-class MenuItem(BaseModel):
-    name: str
-    description: str | None = None
+class MenuItemVariation(BaseModel):
     price: Decimal | None = None
     currency: str = "USD"
     unit: str | None = None
@@ -52,6 +50,12 @@ class MenuItem(BaseModel):
     @classmethod
     def normalize_currency(cls, v: str) -> str:
         return _CURRENCY_SYMBOL_MAP.get(v, v).upper()
+
+
+class MenuItem(BaseModel):
+    name: str
+    description: str | None = None
+    variations: list[MenuItemVariation] = Field(default_factory=list)
 
 
 class MenuCategory(BaseModel):

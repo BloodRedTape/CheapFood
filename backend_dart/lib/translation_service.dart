@@ -114,10 +114,7 @@ ${jsonEncode(strings)}''';
       return MenuItem(
         name: translatedNames[i],
         description: translatedDescs[i],
-        price: original.price,
-        currency: original.currency,
-        unit: original.unit,
-        unitSize: original.unitSize,
+        variations: original.variations,
       );
     });
 

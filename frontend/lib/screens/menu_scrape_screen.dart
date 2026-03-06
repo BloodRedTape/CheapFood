@@ -213,8 +213,7 @@ class _CategoryTabViewState extends State<_CategoryTabView> with SingleTickerPro
                   final item = category.items[index];
                   return _MenuItemCard(
                     item: item,
-                    convertedPrice: widget.state.convertPrice(item.price, item.currency),
-                    displayCurrency: widget.state.selectedCurrency,
+                    state: widget.state,
                   );
                 },
               );
@@ -228,25 +227,24 @@ class _CategoryTabViewState extends State<_CategoryTabView> with SingleTickerPro
 
 class _MenuItemCard extends StatelessWidget {
   final MenuItem item;
-  final double? convertedPrice;
-  final String displayCurrency;
+  final ScrapeSuccess state;
 
-  const _MenuItemCard({required this.item, required this.convertedPrice, required this.displayCurrency});
+  const _MenuItemCard({required this.item, required this.state});
 
-  String? get _unitLabel {
-    if (item.unitSize == null && item.unit == null) return null;
-    final size = item.unitSize != null
-        ? (item.unitSize! % 1 == 0 ? item.unitSize!.toInt().toString() : item.unitSize!.toString())
+  String? _unitLabel(MenuItemVariation v) {
+    if (v.unitSize == null && v.unit == null) return null;
+    final size = v.unitSize != null
+        ? (v.unitSize! % 1 == 0 ? v.unitSize!.toInt().toString() : v.unitSize!.toString())
         : null;
-    if (size != null && item.unit != null) return '$size ${item.unit}';
-    return size ?? item.unit;
+    if (size != null && v.unit != null) return '$size ${v.unit}';
+    return size ?? v.unit;
   }
 
   @override
   Widget build(BuildContext context) {
-    final unitLabel = _unitLabel;
     return ShadCard(
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Expanded(
             child: Column(
@@ -259,12 +257,21 @@ class _MenuItemCard extends StatelessWidget {
           ),
           Column(
             crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              if (convertedPrice != null)
-                Text('${convertedPrice!.toStringAsFixed(2)} $displayCurrency', style: ShadTheme.of(context).textTheme.p.copyWith(fontWeight: FontWeight.bold)),
-              if (unitLabel != null)
-                Text(unitLabel, style: ShadTheme.of(context).textTheme.muted),
-            ],
+            children: item.variations.map((v) {
+              final convertedPrice = state.convertPrice(v.price, v.currency);
+              final unitLabel = _unitLabel(v);
+              return Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (unitLabel != null) ...[
+                    Text(unitLabel, style: ShadTheme.of(context).textTheme.muted),
+                    const SizedBox(width: 6),
+                  ],
+                  if (convertedPrice != null)
+                    Text('${convertedPrice.toStringAsFixed(2)} ${state.selectedCurrency}', style: ShadTheme.of(context).textTheme.p.copyWith(fontWeight: FontWeight.bold)),
+                ],
+              );
+            }).toList(),
           ),
         ],
       ),

@@ -43,12 +43,22 @@ _SCHEMA: dict = {
                             "properties": {
                                 "name": {"type": "string"},
                                 "description": {"type": ["string", "null"]},
-                                "price": {"type": ["number", "null"]},
-                                "currency": {"type": "string"},
-                                "unit": {"type": ["string", "null"]},
-                                "unit_size": {"type": ["number", "null"]},
+                                "variations": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "price": {"type": ["number", "null"]},
+                                            "currency": {"type": "string"},
+                                            "unit": {"type": ["string", "null"]},
+                                            "unit_size": {"type": ["number", "null"]},
+                                        },
+                                        "required": ["price", "currency", "unit", "unit_size"],
+                                        "additionalProperties": False,
+                                    },
+                                },
                             },
-                            "required": ["name", "description", "price", "currency", "unit", "unit_size"],
+                            "required": ["name", "description", "variations"],
                             "additionalProperties": False,
                         },
                     },
