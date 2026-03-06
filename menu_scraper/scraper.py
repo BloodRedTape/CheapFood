@@ -6,6 +6,7 @@ import hashlib
 import logging
 import re
 import shutil
+from collections.abc import Callable, Coroutine
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
 
@@ -138,11 +139,18 @@ async def _download_pdf(
     return pdf_data, local_path
 
 
+ProgressCallback = Callable[[str], Coroutine[None, None, None]]
+
+
 async def scrape_menu(
     url: str,
     timeout: int = 30,
     download_media: bool = True,
+    on_progress: ProgressCallback | None = None,
 ) -> list[MenuCategory]:
+    async def _progress(msg: str) -> None:
+        if on_progress:
+            await on_progress(msg)
     site_dir: Path = RUN_DIR / _url_to_dirname(url)
 
     # Асинхронная очистка и создание директорий
@@ -164,6 +172,7 @@ async def scrape_menu(
     # Если URL ведёт напрямую на PDF — скачиваем и обрабатываем без краулинга
     if _looks_like_pdf(url):
         logger.info("URL is a direct PDF link, skipping crawl: %s", url)
+        await _progress("Downloading PDF...")
         async with httpx.AsyncClient(
             follow_redirects=True,
             timeout=float(timeout),
@@ -173,7 +182,10 @@ async def scrape_menu(
         if not pdf_result:
             return []
         pdf_data, _ = pdf_result
-        return await pdf_extractor.extract(pdf_data, source_url=url, log_dir=pdf_extractor_dir)
+        await _progress("Extracting menu from PDF...")
+        result = await pdf_extractor.extract(pdf_data, source_url=url, log_dir=pdf_extractor_dir)
+        await _progress("Enhancing menu...")
+        return await menu_enhancer.enhance(result)
 
     visited: set[str] = {url}
     current_urls: list[str] = [url]
@@ -197,6 +209,7 @@ async def scrape_menu(
 
         return html, html_filename, media, sub_links
 
+    await _progress("Crawling website...")
     async with httpx.AsyncClient(
         follow_redirects=True,
         timeout=float(timeout),
@@ -206,6 +219,9 @@ async def scrape_menu(
         for depth in range(MAX_DEPTH + 1):
             if not current_urls or len(visited) >= MAX_PAGES:
                 break
+
+            if depth > 0:
+                await _progress(f"Crawling subpages (depth {depth})...")
 
             # Параллельный запуск всех URL на текущем уровне глубины
             tasks = [_process_url(client, u, depth) for u in current_urls]
@@ -243,6 +259,7 @@ async def scrape_menu(
     # Скачиваем и обрабатываем PDF-файлы (могут быть с внешних доменов)
     pdf_media: list[MediaFile] = [m for m in all_media if m.media_type == MenuSourceType.PDF]
     if pdf_media:
+        await _progress(f"Downloading {len(pdf_media)} PDF file(s)...")
         async with httpx.AsyncClient(
             follow_redirects=True,
             timeout=float(timeout),
@@ -251,11 +268,12 @@ async def scrape_menu(
             pdf_tasks = [_download_pdf(pdf_client, m.original_url, pdf_extractor_dir) for m in pdf_media]
             pdf_results = await asyncio.gather(*pdf_tasks)
 
-        for media_file, pdf_result in zip(pdf_media, pdf_results):
+        for i, (media_file, pdf_result) in enumerate(zip(pdf_media, pdf_results), start=1):
             if pdf_result is None:
                 continue
             pdf_data, local_path = pdf_result
             media_file.local_path = str(local_path)
+            await _progress(f"Extracting menu from PDF {i}/{len(pdf_media)}...")
             logger.info("LLM: processing PDF %s", media_file.original_url)
             items = await pdf_extractor.extract(
                 pdf_data, source_url=media_file.original_url, log_dir=pdf_extractor_dir,
@@ -263,7 +281,8 @@ async def scrape_menu(
             logger.info("LLM: done PDF %s — found %d categories", media_file.original_url, len(items))
             all_categories.extend(items)
 
-    for html, html_filename in pending_texts:
+    for i, (html, html_filename) in enumerate(pending_texts, start=1):
+        await _progress(f"Extracting menu from page {i}/{len(pending_texts)}...")
         logger.info("LLM: processing HTML %s", html_filename)
         items = await html_extractor.extract(html, filename=html_filename, log_dir=html_extractor_dir)
         logger.info("LLM: done HTML %s — found %d categories", html_filename, len(items))
@@ -287,6 +306,7 @@ async def scrape_menu(
         for name, items in merged.items()
         if items
     ]
+    await _progress("Enhancing menu...")
     return await menu_enhancer.enhance(result)
 
 

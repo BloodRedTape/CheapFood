@@ -32,6 +32,8 @@ class _MenuScrapeScreenState extends State<MenuScrapeScreen> {
     super.dispose();
   }
 
+  bool _isBusy(ScrapeState state) => state is ScrapeLoading || state is ScrapeStreaming;
+
   void _submit(BuildContext context) {
     context.read<ScrapeCubit>().scrape(
       _urlController.text,
@@ -83,8 +85,8 @@ class _MenuScrapeScreenState extends State<MenuScrapeScreen> {
                 ),
                 const SizedBox(width: 12),
                 BlocBuilder<ScrapeCubit, ScrapeState>(
-                  buildWhen: (prev, curr) => (prev is ScrapeLoading) != (curr is ScrapeLoading),
-                  builder: (context, state) => ShadButton(onPressed: state is ScrapeLoading ? null : () => _submit(context), child: const Text('Search')),
+                  buildWhen: (prev, curr) => _isBusy(prev) != _isBusy(curr),
+                  builder: (context, state) => ShadButton(onPressed: _isBusy(state) ? null : () => _submit(context), child: const Text('Search')),
                 ),
               ],
             ),
@@ -95,6 +97,16 @@ class _MenuScrapeScreenState extends State<MenuScrapeScreen> {
                     (context, state) => switch (state) {
                       ScrapeInitial() => const SizedBox.shrink(),
                       ScrapeLoading() => const Center(child: CircularProgressIndicator()),
+                      ScrapeStreaming(:final message) => Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const CircularProgressIndicator(),
+                              const SizedBox(height: 16),
+                              Text(message, style: ShadTheme.of(context).textTheme.muted),
+                            ],
+                          ),
+                        ),
                       ScrapeFailure(:final message) => ShadAlert.destructive(title: const Text('Error'), description: Text(message)),
                       ScrapeSuccess() => _SuccessView(state: state),
                     },

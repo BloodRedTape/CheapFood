@@ -25,6 +25,7 @@ void main() async {
         translationService: translationService,
       ).call);
 
-  final server = await shelf_io.serve(handler, InternetAddress.anyIPv4, port);
+  final server = await shelf_io.serve(handler, InternetAddress.anyIPv4, port, shared: false);
+  server.autoCompress = false;
   print('Backend running on http://localhost:${server.port}');
 }

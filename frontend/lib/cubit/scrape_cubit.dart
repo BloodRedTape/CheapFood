@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:common_dart/common_dart.dart';
+import 'package:fetch_client/fetch_client.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:http/http.dart' as http;
 
@@ -10,25 +11,21 @@ final class ScrapeInitial extends ScrapeState {}
 
 final class ScrapeLoading extends ScrapeState {}
 
+final class ScrapeStreaming extends ScrapeState {
+  final String message;
+  ScrapeStreaming(this.message);
+}
+
 final class ScrapeSuccess extends ScrapeState {
   final List<MenuCategory> categories;
   final ExchangeRates exchangeRates;
   final String selectedCurrency;
   final String language;
 
-  ScrapeSuccess({
-    required this.categories,
-    required this.exchangeRates,
-    required this.selectedCurrency,
-    required this.language,
-  });
+  ScrapeSuccess({required this.categories, required this.exchangeRates, required this.selectedCurrency, required this.language});
 
-  ScrapeSuccess withCurrency(String currency) => ScrapeSuccess(
-        categories: categories,
-        exchangeRates: exchangeRates,
-        selectedCurrency: currency,
-        language: language,
-      );
+  ScrapeSuccess withCurrency(String currency) =>
+      ScrapeSuccess(categories: categories, exchangeRates: exchangeRates, selectedCurrency: currency, language: language);
 
   /// Converts a price from the base currency to [selectedCurrency].
   double? convertPrice(double? price, String itemCurrency) {
@@ -36,9 +33,7 @@ final class ScrapeSuccess extends ScrapeState {
     if (itemCurrency == selectedCurrency) return price;
 
     final rates = exchangeRates.rates;
-    final toBase = itemCurrency == exchangeRates.base
-        ? price
-        : price / (rates[itemCurrency] ?? 1.0);
+    final toBase = itemCurrency == exchangeRates.base ? price : price / (rates[itemCurrency] ?? 1.0);
     return toBase * (rates[selectedCurrency] ?? 1.0);
   }
 }
@@ -61,22 +56,68 @@ class ScrapeCubit extends Cubit<ScrapeState> {
     emit(ScrapeLoading());
 
     try {
-      final request = ScrapeRequest(url: url.trim(), language: language, forceRefresh: forceRefresh);
+      final requestBody = jsonEncode(ScrapeRequest(url: url.trim(), language: language, forceRefresh: forceRefresh).toJson());
+
+      // Phase 1: stream progress events from scraper
+      final streamRequest = http.Request('POST', Uri.parse('$_backendUrl/scrape/stream'))
+        ..headers['Content-Type'] = 'application/json'
+        ..body = requestBody;
+
+      final streamedResponse = await FetchClient(mode: RequestMode.cors).send(streamRequest);
+
+      if (streamedResponse.statusCode != 200) {
+        emit(ScrapeFailure('Server error: ${streamedResponse.statusCode}'));
+        return;
+      }
+
+      final stream = streamedResponse.stream;
+
+      String buffer = '';
+      String? eventType;
+      String? eventData;
+
+      await for (final chunk in stream) {
+        print('[sse] chunk ${chunk.length} bytes: ${utf8.decode(chunk, allowMalformed: true)}');
+        buffer += utf8.decode(chunk);
+        final lines = buffer.split('\n');
+        buffer = lines.last;
+
+        for (final line in lines.sublist(0, lines.length - 1)) {
+          if (line.startsWith('event: ')) {
+            eventType = line.substring(7).trim();
+          } else if (line.startsWith('data: ')) {
+            eventData = line.substring(6).trim();
+          } else if (line.isEmpty && eventType != null && eventData != null) {
+            if (eventType == 'progress') {
+              emit(ScrapeStreaming(eventData));
+            } else if (eventType == 'error') {
+              emit(ScrapeFailure(eventData));
+              return;
+            }
+            eventType = null;
+            eventData = null;
+          }
+        }
+      }
+
+      // Phase 2: fetch full result (translation + exchange rates) from backend cache
+      emit(ScrapeStreaming('Finishing up...'));
       final response = await http.post(
         Uri.parse('$_backendUrl/scrape'),
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode(request.toJson()),
+        body: jsonEncode(ScrapeRequest(url: url.trim(), language: language, forceRefresh: false).toJson()),
       );
 
       if (response.statusCode == 200) {
-        final scrapeResponse = ScrapeResponse.fromJson(
-            jsonDecode(response.body) as Map<String, dynamic>);
-        emit(ScrapeSuccess(
-          categories: scrapeResponse.categories,
-          exchangeRates: scrapeResponse.exchangeRates,
-          selectedCurrency: selectedCurrency,
-          language: language ?? '',
-        ));
+        final scrapeResponse = ScrapeResponse.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+        emit(
+          ScrapeSuccess(
+            categories: scrapeResponse.categories,
+            exchangeRates: scrapeResponse.exchangeRates,
+            selectedCurrency: selectedCurrency,
+            language: language ?? '',
+          ),
+        );
       } else {
         emit(ScrapeFailure('Server error: ${response.statusCode}'));
       }

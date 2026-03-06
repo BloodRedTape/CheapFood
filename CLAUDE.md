@@ -50,5 +50,12 @@
 - Frontend should be in a mobile app style
 - UI text by default should be English
 
+## SSE Streaming
+- `menu_scraper` exposes `POST /scrape/stream` — SSE with `progress`, `result`, `error` events
+- `backend_dart` proxies it at `POST /scrape/stream` using `dart:io HttpClient` (not `package:http`)
+- shelf buffers streaming responses by default — must set `context: {'shelf.io.buffer_output': false}` on the `Response.ok`
+- Also set `server.autoCompress = false` on the shelf_io server (gzip buffers too)
+- Flutter Web: `package:http` uses XHR which buffers SSE — use `FetchClient(mode: RequestMode.cors)` from `fetch_client` package instead
+- Do NOT add `Transfer-Encoding: chunked` manually — causes double-encoding error in `http_parser`
 
 NEVER READ .env FILES!!!

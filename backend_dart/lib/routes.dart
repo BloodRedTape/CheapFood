@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:common_dart/common_dart.dart';
 import 'package:http/http.dart' as http;
@@ -108,6 +110,49 @@ Router buildRouter({
     return Response.ok(
       jsonEncode(scrapeResponse.toJson()),
       headers: {'Content-Type': 'application/json'},
+    );
+  });
+
+  router.post('/scrape/stream', (Request request) async {
+    final body = await request.readAsString();
+
+    final controller = StreamController<List<int>>();
+
+    Future<void> forward() async {
+      final uri = Uri.parse('$scraperUrl/scrape/stream');
+      final ioClient = HttpClient()..autoUncompress = false;
+      final ioRequest = await ioClient.postUrl(uri);
+      ioRequest.headers.set('Content-Type', 'application/json');
+      ioRequest.write(body);
+      final ioResponse = await ioRequest.close();
+
+      await for (final chunk in ioResponse) {
+        if (controller.isClosed) break;
+        controller.add(chunk);
+      }
+      await controller.close();
+      ioClient.close();
+    }
+
+    forward().catchError((Object e) {
+      if (!controller.isClosed) {
+        controller.add(utf8.encode('event: error\ndata: $e\n\n'));
+        controller.close();
+      }
+    });
+
+    return Response.ok(
+      controller.stream,
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'X-Accel-Buffering': 'no',
+        'Connection': 'keep-alive',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type',
+      },
+      context: {'shelf.io.buffer_output': false},
     );
   });
 
