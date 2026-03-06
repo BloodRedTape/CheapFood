@@ -8,10 +8,12 @@ import 'package:shelf_router/shelf_router.dart';
 import 'config.dart';
 import 'exchange_rate_cache.dart';
 import 'menu_cache.dart';
+import 'translation_service.dart';
 
 Router buildRouter({
   required MenuCache menuCache,
   required ExchangeRateCache rateCache,
+  required TranslationService translationService,
 }) {
   final router = Router();
 
@@ -19,7 +21,9 @@ Router buildRouter({
     final body = await request.readAsString();
     final requestJson = jsonDecode(body) as Map<String, dynamic>;
     final url = requestJson['url'] as String;
+    final language = requestJson['language'] as String?;
 
+    // Always scrape/cache in original language
     var items = menuCache.read(url);
 
     if (items == null) {
@@ -42,6 +46,23 @@ Router buildRouter({
           .map((e) => MenuItem.fromJson(e as Map<String, dynamic>))
           .toList();
       menuCache.write(url, items);
+    }
+
+    // Translate if requested
+    if (language != null && language.isNotEmpty) {
+      try {
+        items = await translationService.translate(
+          url: url,
+          language: language,
+          items: items,
+        );
+      } catch (e, st) {
+        print('Translation error: $e\n$st');
+        return Response.internalServerError(
+          body: jsonEncode({'error': 'Translation failed: $e'}),
+          headers: {'Content-Type': 'application/json'},
+        );
+      }
     }
 
     final base = items

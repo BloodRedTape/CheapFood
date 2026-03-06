@@ -14,17 +14,20 @@ final class ScrapeSuccess extends ScrapeState {
   final List<MenuItem> items;
   final ExchangeRates exchangeRates;
   final String selectedCurrency;
+  final String language;
 
   ScrapeSuccess({
     required this.items,
     required this.exchangeRates,
     required this.selectedCurrency,
+    required this.language,
   });
 
   ScrapeSuccess withCurrency(String currency) => ScrapeSuccess(
         items: items,
         exchangeRates: exchangeRates,
         selectedCurrency: currency,
+        language: language,
       );
 
   /// Converts a price from the base currency to [selectedCurrency].
@@ -51,13 +54,13 @@ class ScrapeCubit extends Cubit<ScrapeState> {
 
   ScrapeCubit() : super(ScrapeInitial());
 
-  Future<void> scrape(String url) async {
+  Future<void> scrape(String url, {String? language}) async {
     if (url.trim().isEmpty) return;
 
     emit(ScrapeLoading());
 
     try {
-      final request = ScrapeRequest(url: url.trim());
+      final request = ScrapeRequest(url: url.trim(), language: language);
       final response = await http.post(
         Uri.parse('$_backendUrl/scrape'),
         headers: {'Content-Type': 'application/json'},
@@ -71,6 +74,7 @@ class ScrapeCubit extends Cubit<ScrapeState> {
           items: scrapeResponse.items,
           exchangeRates: scrapeResponse.exchangeRates,
           selectedCurrency: scrapeResponse.exchangeRates.base,
+          language: language ?? '',
         ));
       } else {
         emit(ScrapeFailure('Server error: ${response.statusCode}'));

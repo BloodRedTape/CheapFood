@@ -12,8 +12,20 @@ class MenuScrapeScreen extends StatefulWidget {
   State<MenuScrapeScreen> createState() => _MenuScrapeScreenState();
 }
 
+const List<(String, String)> _languages = [
+  ('Original', ''),
+  ('English', 'en'),
+  ('Russian', 'ru'),
+  ('Czech', 'cs'),
+  ('Ukrainian', 'uk'),
+  ('German', 'de'),
+  ('French', 'fr'),
+  ('Spanish', 'es'),
+];
+
 class _MenuScrapeScreenState extends State<MenuScrapeScreen> {
   final TextEditingController _urlController = TextEditingController();
+  String _selectedLanguage = '';
 
   @override
   void dispose() {
@@ -22,7 +34,10 @@ class _MenuScrapeScreenState extends State<MenuScrapeScreen> {
   }
 
   void _submit(BuildContext context) {
-    context.read<ScrapeCubit>().scrape(_urlController.text);
+    context.read<ScrapeCubit>().scrape(
+          _urlController.text,
+          language: _selectedLanguage.isEmpty ? null : _selectedLanguage,
+        );
   }
 
   @override
@@ -43,6 +58,25 @@ class _MenuScrapeScreenState extends State<MenuScrapeScreen> {
                     placeholder: const Text('https://example.com/menu'),
                     onSubmitted: (_) => _submit(context),
                   ),
+                ),
+                const SizedBox(width: 12),
+                ShadSelect<String>(
+                  initialValue: _selectedLanguage,
+                  onChanged: (value) {
+                    if (value != null) {
+                      setState(() => _selectedLanguage = value);
+                    }
+                  },
+                  options: _languages
+                      .map((l) => ShadOption(value: l.$2, child: Text(l.$1)))
+                      .toList(),
+                  selectedOptionBuilder: (context, value) {
+                    final label = _languages
+                        .firstWhere((l) => l.$2 == value,
+                            orElse: () => _languages.first)
+                        .$1;
+                    return Text(label);
+                  },
                 ),
                 const SizedBox(width: 12),
                 BlocBuilder<ScrapeCubit, ScrapeState>(
