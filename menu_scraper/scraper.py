@@ -9,6 +9,8 @@ from pathlib import Path
 from urllib.parse import urljoin, urlparse
 import asyncio
 import shutil
+from urllib.parse import urljoin
+from parsel import Selector
 
 import httpx
 from parsel import Selector
@@ -63,22 +65,17 @@ def _same_domain(url: str, base_url: str) -> bool:
 
 
 def _find_subpage_links(sel: Selector, base_url: str) -> list[str]:
-    """Find links on the page that likely lead to menu-related subpages."""
-    links: list[str] = []
-    for a in sel.css("a[href]"):
-        href: str = a.attrib.get("href", "").strip()
-        if not href or href.startswith(("#", "mailto:", "tel:", "javascript:")):
+    absolute_links: list[str] = []
+    
+    for link in sel.css("a::attr(href)").getall():
+        clean_link = link.strip()
+        if not clean_link:
             continue
-        full_url: str = urljoin(base_url, href)
-        if not _same_domain(full_url, base_url):
-            continue
-        full_url = full_url.split("#")[0]
-        anchor_text: str = " ".join(a.css("::text").getall()).strip().lower()
-        combined: str = f"{anchor_text} {full_url.lower()}"
-        if any(kw in combined for kw in MENU_KEYWORDS):
-            links.append(full_url)
-    return links
-
+            
+        full_url = urljoin(base_url, clean_link)
+        absolute_links.append(full_url)
+        
+    return absolute_links
 
 async def _fetch_page(
     client: httpx.AsyncClient,
@@ -125,27 +122,29 @@ async def scrape_menu(
     visited: set[str] = {url}
     current_urls: list[str] = [url]
     
-    all_clean_texts: list[str] = []
     all_media: list[MediaFile] = []
+    # (clean_text, html_filename) для последующей отправки в LLM
+    pending_texts: list[tuple[str, str]] = []
 
-    # Вспомогательная функция для обработки одного URL
+    # Вспомогательная функция для обработки одного URL (без LLM)
     async def _process_url(client: httpx.AsyncClient, current_url: str, depth: int):
         result = await _fetch_page(client, current_url, site_dir, depth)
         if not result:
             return None
-            
+
         html, page_url = result
         sel = Selector(text=html)
         clean_text = clean_html(html)
-        
+        html_filename: str = _url_to_filename(page_url)
+
         media = _extract_pdf_links(sel, page_url) + _extract_menu_images(sel, page_url)
         sub_links = _find_subpage_links(sel, page_url) if depth < MAX_DEPTH else []
-            
-        return clean_text, media, sub_links
+
+        return clean_text, html_filename, media, sub_links
 
     async with httpx.AsyncClient(
-        follow_redirects=True, 
-        timeout=float(timeout), 
+        follow_redirects=True,
+        timeout=float(timeout),
         headers={"User-Agent": USER_AGENT}
     ) as client:
         # Поуровневый обход (BFS)
@@ -157,29 +156,65 @@ async def scrape_menu(
             tasks = [_process_url(client, u, depth) for u in current_urls]
             results = await asyncio.gather(*tasks)
 
-            next_urls = set()
+            next_urls: set[str] = set()
             for res in results:
-                if not res: 
+                if not res:
                     continue
-                
-                text, media, links = res
-                if text.strip(): 
-                    all_clean_texts.append(text)
+
+                clean_text, html_filename, media, links = res
+                if clean_text.strip():
+                    pending_texts.append((clean_text, html_filename))
                 all_media.extend(media)
-                
+
                 # Собираем уникальные ссылки для следующего уровня
                 for link in links:
                     if link not in visited and len(visited) + len(next_urls) < MAX_PAGES:
                         visited.add(link)
                         next_urls.add(link)
-            
+
             current_urls = list(next_urls)
 
-    # Отправка собранного текста в Gemini
-    combined_text: str = "\n\n---PAGE BREAK---\n\n".join(all_clean_texts)
-    all_items = await extractor.extract(combined_text) if combined_text.strip() else []
+    # Батчинг текстов для LLM: объединяем маленькие тексты в один запрос
+    BATCH_CHAR_LIMIT: int = 8000
+    all_items: list[MenuItem] = []
+    batch_texts: list[tuple[str, str]] = []  # (clean_text, html_filename)
+    batch_size: int = 0
 
-    # Дедупликация (остается без изменений)
+    async def _flush_batch() -> None:
+        nonlocal batch_texts, batch_size
+        if not batch_texts:
+            return
+        if len(batch_texts) == 1:
+            text, fname = batch_texts[0]
+            log_path = site_dir / fname.replace(".html", ".llm.txt")
+            items = await extractor.extract(text, log_path=log_path)
+        else:
+            combined = "\n\n---PAGE BREAK---\n\n".join(t for t, _ in batch_texts)
+            log_name = batch_texts[0][1].replace(".html", "") + "_batch.llm.txt"
+            log_path = site_dir / log_name
+            items = await extractor.extract(combined, log_path=log_path)
+        all_items.extend(items)
+        batch_texts = []
+        batch_size = 0
+
+    for clean_text, html_filename in pending_texts:
+        text_len = len(clean_text)
+        # Если текст сам по себе большой — отправляем отдельно
+        if text_len >= BATCH_CHAR_LIMIT:
+            await _flush_batch()
+            log_path = site_dir / html_filename.replace(".html", ".llm.txt")
+            items = await extractor.extract(clean_text, log_path=log_path)
+            all_items.extend(items)
+            continue
+        # Если добавление переполнит батч — сначала сбросим
+        if batch_size + text_len > BATCH_CHAR_LIMIT:
+            await _flush_batch()
+        batch_texts.append((clean_text, html_filename))
+        batch_size += text_len
+
+    await _flush_batch()
+
+    # Дедупликация
     seen_names = set()
     unique_items = []
     for item in all_items:
