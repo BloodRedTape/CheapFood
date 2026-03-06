@@ -16,7 +16,6 @@ from menu_scraper.config import get_settings
 from menu_scraper.models.menu import (
     MediaFile,
     MenuItem,
-    MenuResult,
     MenuSourceType,
 )
 from menu_scraper.processing.html_cleaner import clean_html
@@ -135,7 +134,7 @@ async def scrape_menu(
     url: str,
     timeout: int = 30,
     download_media: bool = True,
-) -> MenuResult:
+) -> list[MenuItem]:
     site_dir: Path = RUN_DIR / _url_to_dirname(url)
     
     # Асинхронная очистка и создание директорий
@@ -291,18 +290,7 @@ async def scrape_menu(
             seen_names.add(key)
             unique_items.append(item)
 
-    unique_media = all_media  # already deduplicated above
-
-    source_type = MenuSourceType.HTML_TEXT
-    if not unique_items and unique_media:
-        source_type = unique_media[0].media_type
-
-    return MenuResult(
-        url=url,
-        items=unique_items,
-        source_type=source_type,
-        media_files=unique_media,
-    )
+    return unique_items
 
 
 def _extract_pdf_links(sel: Selector, base_url: str) -> list[MediaFile]:

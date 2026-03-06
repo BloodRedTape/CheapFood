@@ -1,0 +1,14 @@
+name: backend_dart
+description: CheapFood backend — proxies requests to menu_scraper microservice.
+version: 0.0.1
+
+environment:
+  sdk: ^3.7.0
+
+dependencies:
+  shelf: ^1.4.2
+  shelf_router: ^1.1.4
+  http: ^1.2.2
+
+dev_dependencies:
+  lints: ^5.0.0
