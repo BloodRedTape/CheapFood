@@ -153,6 +153,20 @@ async def scrape_menu(
     html_extractor = HtmlMenuExtractor(api_key=settings.openai_api_key)
     pdf_extractor = PdfMenuExtractor(api_key=settings.openai_api_key)
 
+    # Если URL ведёт напрямую на PDF — скачиваем и обрабатываем без краулинга
+    if _looks_like_pdf(url):
+        logger.info("URL is a direct PDF link, skipping crawl: %s", url)
+        async with httpx.AsyncClient(
+            follow_redirects=True,
+            timeout=float(timeout),
+            headers={"User-Agent": USER_AGENT},
+        ) as client:
+            pdf_result = await _download_pdf(client, url, pdf_extractor_dir)
+        if not pdf_result:
+            return []
+        pdf_data, _ = pdf_result
+        return await pdf_extractor.extract(pdf_data, source_url=url, log_dir=pdf_extractor_dir)
+
     visited: set[str] = {url}
     current_urls: list[str] = [url]
 
@@ -296,8 +310,11 @@ def _extract_pdf_links(sel: Selector, base_url: str) -> list[MediaFile]:
 
 def _looks_like_pdf(url: str) -> bool:
     """Check if a URL points to a PDF file."""
-    path: str = urlparse(url).path.lower()
-    return path.endswith(".pdf")
+    parsed = urlparse(url)
+    if parsed.path.lower().endswith(".pdf"):
+        return True
+    # Also check query parameters (e.g. ?filename=menu.pdf)
+    return ".pdf" in parsed.query.lower()
 
 
 def _extract_menu_images(sel: Selector, base_url: str) -> list[MediaFile]:
