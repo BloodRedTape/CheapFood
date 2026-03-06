@@ -23,5 +23,6 @@
 
 ## Conventions
 - Communicate in Russian
+- Log messages in English
 - Tests are local to each service
 - Use `.env` for configuration (pydantic-settings with CHEAPFOOD_ prefix)

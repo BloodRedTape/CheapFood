@@ -1,16 +1,13 @@
 """Core scraper: fetches URL with httpx, crawls subpages, extracts menus via Gemini."""
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 import re
 import shutil
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
-import asyncio
-import shutil
-from urllib.parse import urljoin
-from parsel import Selector
 
 import httpx
 from parsel import Selector
@@ -104,6 +101,36 @@ async def _fetch_page(
     return html, str(response.url)
 
 
+async def _download_pdf(
+    client: httpx.AsyncClient,
+    url: str,
+    site_dir: Path,
+) -> tuple[bytes, Path] | None:
+    """Download a PDF file and save to disk. Returns (pdf_bytes, local_path) or None."""
+    try:
+        response: httpx.Response = await client.get(url)
+        response.raise_for_status()
+    except httpx.HTTPError as exc:
+        logger.warning("Failed to download PDF %s: %s", url, exc)
+        return None
+
+    pdf_data: bytes = response.content
+    if len(pdf_data) < 100:
+        logger.warning("PDF too small, likely not a real PDF: %s (%d bytes)", url, len(pdf_data))
+        return None
+
+    url_hash: str = hashlib.md5(url.encode()).hexdigest()[:10]
+    parsed = urlparse(url)
+    stem: str = parsed.path.strip("/").replace("/", "_").removesuffix(".pdf") or "doc"
+    safe_stem: str = re.sub(r"[^a-zA-Z0-9_]", "", stem)[:60]
+    filename: str = f"{safe_stem}_{url_hash}.pdf"
+    local_path: Path = site_dir / filename
+    local_path.write_bytes(pdf_data)
+    logger.info("Saved PDF: %s -> %s (%d bytes)", url, filename, len(pdf_data))
+
+    return pdf_data, local_path
+
+
 async def scrape_menu(
     url: str,
     timeout: int = 30,
@@ -174,9 +201,43 @@ async def scrape_menu(
 
             current_urls = list(next_urls)
 
-    # Батчинг текстов для LLM: объединяем маленькие тексты в один запрос
-    BATCH_CHAR_LIMIT: int = 8000
     all_items: list[MenuItem] = []
+
+    # Дедупликация медиа перед обработкой
+    seen_media_urls: set[str] = set()
+    deduped_media: list[MediaFile] = []
+    for mf in all_media:
+        if mf.original_url not in seen_media_urls:
+            seen_media_urls.add(mf.original_url)
+            deduped_media.append(mf)
+    all_media = deduped_media
+
+    # Скачиваем и обрабатываем PDF-файлы (могут быть с внешних доменов)
+    pdf_media: list[MediaFile] = [m for m in all_media if m.media_type == MenuSourceType.PDF]
+    if pdf_media:
+        async with httpx.AsyncClient(
+            follow_redirects=True,
+            timeout=float(timeout),
+            headers={"User-Agent": USER_AGENT},
+        ) as pdf_client:
+            pdf_tasks = [_download_pdf(pdf_client, m.original_url, site_dir) for m in pdf_media]
+            pdf_results = await asyncio.gather(*pdf_tasks)
+
+        for media_file, pdf_result in zip(pdf_media, pdf_results):
+            if pdf_result is None:
+                continue
+            pdf_data, local_path = pdf_result
+            media_file.local_path = str(local_path)
+            log_path = local_path.with_suffix(".llm.txt")
+            logger.info("LLM: processing PDF %s", media_file.original_url)
+            items = await extractor.extract_from_pdf(
+                pdf_data, source_url=media_file.original_url, log_path=log_path,
+            )
+            logger.info("LLM: done PDF %s — found %d items", media_file.original_url, len(items))
+            all_items.extend(items)
+
+    # Батчинг текстов для LLM: объединяем маленькие тексты в один запрос
+    BATCH_CHAR_LIMIT: int = 32000
     batch_texts: list[tuple[str, str]] = []  # (clean_text, html_filename)
     batch_size: int = 0
 
@@ -187,12 +248,17 @@ async def scrape_menu(
         if len(batch_texts) == 1:
             text, fname = batch_texts[0]
             log_path = site_dir / fname.replace(".html", ".llm.txt")
+            logger.info("LLM: processing HTML %s", fname)
             items = await extractor.extract(text, log_path=log_path)
+            logger.info("LLM: done HTML %s — found %d items", fname, len(items))
         else:
+            names = [f for _, f in batch_texts]
+            logger.info("LLM: processing HTML batch: %s", ", ".join(names))
             combined = "\n\n---PAGE BREAK---\n\n".join(t for t, _ in batch_texts)
             log_name = batch_texts[0][1].replace(".html", "") + "_batch.llm.txt"
             log_path = site_dir / log_name
             items = await extractor.extract(combined, log_path=log_path)
+            logger.info("LLM: done HTML batch — found %d items", len(items))
         all_items.extend(items)
         batch_texts = []
         batch_size = 0
@@ -203,7 +269,9 @@ async def scrape_menu(
         if text_len >= BATCH_CHAR_LIMIT:
             await _flush_batch()
             log_path = site_dir / html_filename.replace(".html", ".llm.txt")
+            logger.info("LLM: processing HTML %s (%d chars)", html_filename, text_len)
             items = await extractor.extract(clean_text, log_path=log_path)
+            logger.info("LLM: done HTML %s — found %d items", html_filename, len(items))
             all_items.extend(items)
             continue
         # Если добавление переполнит батч — сначала сбросим
@@ -223,12 +291,7 @@ async def scrape_menu(
             seen_names.add(key)
             unique_items.append(item)
 
-    seen_urls = set()
-    unique_media = []
-    for mf in all_media:
-        if mf.original_url not in seen_urls:
-            seen_urls.add(mf.original_url)
-            unique_media.append(mf)
+    unique_media = all_media  # already deduplicated above
 
     source_type = MenuSourceType.HTML_TEXT
     if not unique_items and unique_media:
@@ -243,22 +306,36 @@ async def scrape_menu(
 
 
 def _extract_pdf_links(sel: Selector, base_url: str) -> list[MediaFile]:
-    """Find PDF links that likely contain menus."""
+    """Find PDF links on the page.
+
+    On restaurant sites PDFs are almost always menus, so we collect every
+    PDF link without keyword filtering.
+    """
     results: list[MediaFile] = []
-    for link in sel.css("a[href$='.pdf'], a[href*='.pdf?']"):
-        href: str = link.attrib.get("href", "")
-        anchor_text: str = " ".join(link.css("::text").getall()).strip().lower()
+    seen_urls: set[str] = set()
+    for link in sel.css("a"):
+        href: str = link.attrib.get("href", "").strip()
         if not href:
             continue
         full_url: str = urljoin(base_url, href)
-        combined: str = f"{anchor_text} {href.lower()}"
-        if any(kw in combined for kw in MENU_KEYWORDS) or "pdf" in anchor_text:
-            results.append(MediaFile(
-                original_url=full_url,
-                local_path="",
-                media_type=MenuSourceType.PDF,
-            ))
+        # Check both the raw href and the resolved URL for .pdf
+        if not (_looks_like_pdf(href) or _looks_like_pdf(full_url)):
+            continue
+        if full_url in seen_urls:
+            continue
+        seen_urls.add(full_url)
+        results.append(MediaFile(
+            original_url=full_url,
+            local_path="",
+            media_type=MenuSourceType.PDF,
+        ))
     return results
+
+
+def _looks_like_pdf(url: str) -> bool:
+    """Check if a URL points to a PDF file."""
+    path: str = urlparse(url).path.lower()
+    return path.endswith(".pdf")
 
 
 def _extract_menu_images(sel: Selector, base_url: str) -> list[MediaFile]:
