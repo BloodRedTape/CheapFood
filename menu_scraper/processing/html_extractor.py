@@ -22,6 +22,8 @@ For each item return:
 - description: dish description if present, null otherwise
 - price: numeric price if present, null otherwise
 - currency: ISO currency code (USD, EUR, ILS, GBP, etc.), default USD
+- unit: unit of measurement if present (e.g. "L", "ml", "g", "kg", "pcs"), null otherwise
+- unit_size: numeric size/quantity for the unit (e.g. 0.5, 330, 100), null otherwise
 
 Rules:
 - Group items by the section headers/titles found in the text
@@ -30,6 +32,7 @@ Rules:
 - Keep original dish names and category names, do not translate
 - If price has comma as decimal separator, convert to dot (e.g. 12,50 -> 12.50)
 - If price is missing or not listed, set price to null
+- unit and unit_size go together: if one is absent, both should be null
 - If no items found, return empty list
 - Do NOT invent items or categories that are not in the text"""
 

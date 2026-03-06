@@ -45,6 +45,8 @@ class MenuItem(BaseModel):
     description: str | None = None
     price: Decimal | None = None
     currency: str = "USD"
+    unit: str | None = None
+    unit_size: Decimal | None = None
 
     @field_validator("currency", mode="before")
     @classmethod

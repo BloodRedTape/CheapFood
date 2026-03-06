@@ -222,8 +222,18 @@ class _MenuItemCard extends StatelessWidget {
 
   const _MenuItemCard({required this.item, required this.convertedPrice, required this.displayCurrency});
 
+  String? get _unitLabel {
+    if (item.unitSize == null && item.unit == null) return null;
+    final size = item.unitSize != null
+        ? (item.unitSize! % 1 == 0 ? item.unitSize!.toInt().toString() : item.unitSize!.toString())
+        : null;
+    if (size != null && item.unit != null) return '$size ${item.unit}';
+    return size ?? item.unit;
+  }
+
   @override
   Widget build(BuildContext context) {
+    final unitLabel = _unitLabel;
     return ShadCard(
       child: Row(
         children: [
@@ -236,8 +246,15 @@ class _MenuItemCard extends StatelessWidget {
               ],
             ),
           ),
-          if (convertedPrice != null)
-            Text('${convertedPrice!.toStringAsFixed(2)} $displayCurrency', style: ShadTheme.of(context).textTheme.p.copyWith(fontWeight: FontWeight.bold)),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              if (convertedPrice != null)
+                Text('${convertedPrice!.toStringAsFixed(2)} $displayCurrency', style: ShadTheme.of(context).textTheme.p.copyWith(fontWeight: FontWeight.bold)),
+              if (unitLabel != null)
+                Text(unitLabel, style: ShadTheme.of(context).textTheme.muted),
+            ],
+          ),
         ],
       ),
     );

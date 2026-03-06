@@ -3,12 +3,16 @@ class MenuItem {
   final String? description;
   final double? price;
   final String currency;
+  final String? unit;
+  final double? unitSize;
 
   const MenuItem({
     required this.name,
     this.description,
     this.price,
     this.currency = 'USD',
+    this.unit,
+    this.unitSize,
   });
 
   factory MenuItem.fromJson(Map<String, dynamic> json) {
@@ -21,6 +25,12 @@ class MenuItem {
         _ => null,
       },
       currency: (json['currency'] as String?) ?? 'USD',
+      unit: json['unit'] as String?,
+      unitSize: switch (json['unit_size']) {
+        num n => n.toDouble(),
+        String s => double.tryParse(s),
+        _ => null,
+      },
     );
   }
 
@@ -29,5 +39,7 @@ class MenuItem {
         if (description != null) 'description': description,
         if (price != null) 'price': price,
         'currency': currency,
+        if (unit != null) 'unit': unit,
+        if (unitSize != null) 'unit_size': unitSize,
       };
 }
