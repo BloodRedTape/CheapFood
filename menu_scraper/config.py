@@ -11,7 +11,7 @@ class ScraperSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="SCRAPER_", env_file=_ENV_FILE)
 
     host: str = "0.0.0.0"
-    port: int = 8000
+    port: int = 5491
     media_dir: str = "./media"
     log_level: str = "DEBUG"
 

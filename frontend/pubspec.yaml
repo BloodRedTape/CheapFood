@@ -38,6 +38,7 @@ dependencies:
   shadcn_ui: ^0.18.0
   common_dart:
     path: ../common_dart
+  shared_preferences: ^2.5.3
 
 dev_dependencies:
   flutter_test:

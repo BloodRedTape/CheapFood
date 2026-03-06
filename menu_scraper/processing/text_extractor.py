@@ -44,7 +44,7 @@ class TextMenuExtractor:
     ) -> None:
         self._client: AsyncOpenAI = AsyncOpenAI(api_key=api_key)
         self._model: str = model
-        self._semaphore: asyncio.Semaphore = asyncio.Semaphore(1)
+        self._rate_lock: asyncio.Lock = asyncio.Lock()
         self._interval: float = 60.0 / rpm
         self._last_call: float = 0.0
 
@@ -66,21 +66,21 @@ class TextMenuExtractor:
 
         for attempt in range(self.MAX_RETRIES):
             try:
-                async with self._semaphore:
+                async with self._rate_lock:
                     now: float = asyncio.get_event_loop().time()
                     wait: float = self._interval - (now - self._last_call)
                     if wait > 0:
                         logger.info("Rate limit: waiting %.1fs", wait)
                         await asyncio.sleep(wait)
-                    response = await self._client.beta.chat.completions.parse(
-                        model=self._model,
-                        messages=[
-                            {"role": "system", "content": SYSTEM_PROMPT},
-                            {"role": "user", "content": text},
-                        ],
-                        response_format=MenuCategoryList,
-                    )
                     self._last_call = asyncio.get_event_loop().time()
+                response = await self._client.beta.chat.completions.parse(
+                    model=self._model,
+                    messages=[
+                        {"role": "system", "content": SYSTEM_PROMPT},
+                        {"role": "user", "content": text},
+                    ],
+                    response_format=MenuCategoryList,
+                )
 
                 result: MenuCategoryList = response.choices[0].message.parsed or MenuCategoryList()
                 total = sum(len(c.items) for c in result.categories)

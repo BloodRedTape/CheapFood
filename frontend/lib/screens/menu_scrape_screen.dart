@@ -5,8 +5,16 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 
 import '../cubit/scrape_cubit.dart';
 
+String _restaurantName(String url) {
+  final host = Uri.tryParse(url)?.host ?? url;
+  final parts = host.split('.').where((p) => p != 'www').toList();
+  return parts.isNotEmpty ? parts.first : host;
+}
+
 class MenuScrapeScreen extends StatefulWidget {
-  const MenuScrapeScreen({super.key});
+  final String? restaurantUrl;
+
+  const MenuScrapeScreen({super.key, this.restaurantUrl});
 
   @override
   State<MenuScrapeScreen> createState() => _MenuScrapeScreenState();
@@ -22,43 +30,31 @@ const List<(String, String, String)> _languages = [
 ];
 
 class _MenuScrapeScreenState extends State<MenuScrapeScreen> {
-  final TextEditingController _urlController = TextEditingController();
   String _selectedLanguage = '';
-  bool _forceRefresh = false;
-
-  @override
-  void dispose() {
-    _urlController.dispose();
-    super.dispose();
-  }
-
-  bool _isBusy(ScrapeState state) => state is ScrapeLoading || state is ScrapeStreaming;
-
-  void _submit(BuildContext context) {
-    context.read<ScrapeCubit>().scrape(
-      _urlController.text,
-      language: _selectedLanguage.isEmpty ? null : _selectedLanguage,
-      forceRefresh: _forceRefresh,
-    );
-  }
 
   @override
   Widget build(BuildContext context) {
+    final title = widget.restaurantUrl != null ? _restaurantName(widget.restaurantUrl!) : '';
     return Scaffold(
       body: Padding(
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
-                Text('Stupid Me', style: ShadTheme.of(context).textTheme.h2),
+                ShadButton.ghost(onPressed: () => Navigator.of(context).pop(), child: const Icon(Icons.arrow_back)),
+                const SizedBox(width: 8),
+                Text(title, style: ShadTheme.of(context).textTheme.h2),
                 const Spacer(),
                 ShadSelect<String>(
                   initialValue: _selectedLanguage,
                   onChanged: (value) {
                     if (value != null) {
                       setState(() => _selectedLanguage = value);
+                      if (widget.restaurantUrl != null) {
+                        context.read<ScrapeCubit>().scrape(widget.restaurantUrl!, language: value.isEmpty ? null : value);
+                      }
                     }
                   },
                   options: _languages.map((l) => ShadOption(value: l.$3, child: Text('${l.$1} ${l.$2}'))).toList(),
@@ -71,25 +67,6 @@ class _MenuScrapeScreenState extends State<MenuScrapeScreen> {
                 const _CurrencySelect(),
               ],
             ),
-            const SizedBox(height: 24),
-            Row(
-              children: [
-                Expanded(
-                  child: ShadInput(controller: _urlController, placeholder: const Text('https://example.com/menu'), onSubmitted: (_) => _submit(context)),
-                ),
-                const SizedBox(width: 12),
-                ShadCheckbox(
-                  value: _forceRefresh,
-                  onChanged: (value) => setState(() => _forceRefresh = value),
-                  label: const Text('Refresh'),
-                ),
-                const SizedBox(width: 12),
-                BlocBuilder<ScrapeCubit, ScrapeState>(
-                  buildWhen: (prev, curr) => _isBusy(prev) != _isBusy(curr),
-                  builder: (context, state) => ShadButton(onPressed: _isBusy(state) ? null : () => _submit(context), child: const Text('Search')),
-                ),
-              ],
-            ),
             const SizedBox(height: 16),
             Expanded(
               child: BlocBuilder<ScrapeCubit, ScrapeState>(
@@ -98,15 +75,15 @@ class _MenuScrapeScreenState extends State<MenuScrapeScreen> {
                       ScrapeInitial() => const SizedBox.shrink(),
                       ScrapeLoading() => const Center(child: CircularProgressIndicator()),
                       ScrapeStreaming(:final message) => Center(
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const CircularProgressIndicator(),
-                              const SizedBox(height: 16),
-                              Text(message, style: ShadTheme.of(context).textTheme.muted),
-                            ],
-                          ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const CircularProgressIndicator(),
+                            const SizedBox(height: 16),
+                            Text(message, style: ShadTheme.of(context).textTheme.muted),
+                          ],
                         ),
+                      ),
                       ScrapeFailure(:final message) => ShadAlert.destructive(title: const Text('Error'), description: Text(message)),
                       ScrapeSuccess() => _SuccessView(state: state),
                     },
@@ -131,10 +108,7 @@ class _CurrencySelect extends StatelessWidget {
       onChanged: (value) {
         if (value != null) cubit.selectCurrency(value);
       },
-      options: [
-        const ShadOption(value: '', child: Text('🌐 Original')),
-        ...options.map((c) => ShadOption(value: c, child: Text(c))),
-      ],
+      options: [const ShadOption(value: '', child: Text('🌐 Original')), ...options.map((c) => ShadOption(value: c, child: Text(c)))],
       selectedOptionBuilder: (context, value) => Text(value.isEmpty ? '🌐' : value),
     );
   }
@@ -158,9 +132,7 @@ class _SuccessView extends StatelessWidget {
           children: [
             Text('$totalItems items found', style: ShadTheme.of(context).textTheme.muted),
             const SizedBox(height: 12),
-            Expanded(
-              child: _CategoryTabView(state: cubitState, categories: categories),
-            ),
+            Expanded(child: _CategoryTabView(state: cubitState, categories: categories)),
           ],
         );
       },
@@ -212,27 +184,23 @@ class _CategoryTabViewState extends State<_CategoryTabView> with SingleTickerPro
           controller: _tabController,
           isScrollable: true,
           tabAlignment: TabAlignment.start,
-          tabs: widget.categories
-              .map((c) => Tab(text: c.name ?? 'Menu'))
-              .toList(),
+          tabs: widget.categories.map((c) => Tab(text: c.name ?? 'Menu')).toList(),
         ),
         Expanded(
           child: TabBarView(
             controller: _tabController,
-            children: widget.categories.map((category) {
-              return ListView.separated(
-                padding: const EdgeInsets.only(top: 12),
-                itemCount: category.items.length,
-                separatorBuilder: (_, __) => const Divider(),
-                itemBuilder: (context, index) {
-                  final item = category.items[index];
-                  return _MenuItemCard(
-                    item: item,
-                    state: widget.state,
+            children:
+                widget.categories.map((category) {
+                  return ListView.separated(
+                    padding: const EdgeInsets.only(top: 12),
+                    itemCount: category.items.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 8),
+                    itemBuilder: (context, index) {
+                      final item = category.items[index];
+                      return _MenuItemCard(item: item, state: widget.state);
+                    },
                   );
-                },
-              );
-            }).toList(),
+                }).toList(),
           ),
         ),
       ],
@@ -248,9 +216,7 @@ class _MenuItemCard extends StatelessWidget {
 
   String? _unitLabel(MenuItemVariation v) {
     if (v.unitSize == null && v.unit == null) return null;
-    final size = v.unitSize != null
-        ? (v.unitSize! % 1 == 0 ? v.unitSize!.toInt().toString() : v.unitSize!.toString())
-        : null;
+    final size = v.unitSize != null ? (v.unitSize! % 1 == 0 ? v.unitSize!.toInt().toString() : v.unitSize!.toString()) : null;
     if (size != null && v.unit != null) return '$size ${v.unit}';
     return size ?? v.unit;
   }
@@ -258,6 +224,7 @@ class _MenuItemCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ShadCard(
+      padding: EdgeInsets.all(16),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -272,21 +239,22 @@ class _MenuItemCard extends StatelessWidget {
           ),
           Column(
             crossAxisAlignment: CrossAxisAlignment.end,
-            children: item.variations.map((v) {
-              final convertedPrice = state.convertPrice(v.price, v.currency);
-              final unitLabel = _unitLabel(v);
-              return Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (unitLabel != null) ...[
-                    Text(unitLabel, style: ShadTheme.of(context).textTheme.muted),
-                    const SizedBox(width: 6),
-                  ],
-                  if (convertedPrice != null)
-                    Text('${convertedPrice.toStringAsFixed(2)} ${state.priceLabel(v.currency)}', style: ShadTheme.of(context).textTheme.p.copyWith(fontWeight: FontWeight.bold)),
-                ],
-              );
-            }).toList(),
+            children:
+                item.variations.map((v) {
+                  final convertedPrice = state.convertPrice(v.price, v.currency);
+                  final unitLabel = _unitLabel(v);
+                  return Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (unitLabel != null) ...[Text(unitLabel, style: ShadTheme.of(context).textTheme.muted), const SizedBox(width: 6)],
+                      if (convertedPrice != null)
+                        Text(
+                          '${convertedPrice.toStringAsFixed(2)} ${state.priceLabel(v.currency)}',
+                          style: ShadTheme.of(context).textTheme.p.copyWith(fontWeight: FontWeight.bold),
+                        ),
+                    ],
+                  );
+                }).toList(),
           ),
         ],
       ),

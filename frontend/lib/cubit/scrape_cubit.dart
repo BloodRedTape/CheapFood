@@ -5,6 +5,8 @@ import 'package:fetch_client/fetch_client.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:http/http.dart' as http; // needed for http.Request
 
+import '../config.dart';
+
 sealed class ScrapeState {}
 
 final class ScrapeInitial extends ScrapeState {}
@@ -49,8 +51,6 @@ final class ScrapeFailure extends ScrapeState {
 }
 
 class ScrapeCubit extends Cubit<ScrapeState> {
-  static const String _backendUrl = 'http://localhost:8080';
-
   String selectedCurrency = '';
 
   ScrapeCubit() : super(ScrapeInitial());
@@ -64,7 +64,7 @@ class ScrapeCubit extends Cubit<ScrapeState> {
       final requestBody = jsonEncode(ScrapeRequest(url: url.trim(), language: language, forceRefresh: forceRefresh).toJson());
 
       // Phase 1: stream progress events from scraper
-      final streamRequest = http.Request('POST', Uri.parse('$_backendUrl/scrape/stream'))
+      final streamRequest = http.Request('POST', Uri.parse('$backendUrl/scrape/stream'))
         ..headers['Content-Type'] = 'application/json'
         ..body = requestBody;
 

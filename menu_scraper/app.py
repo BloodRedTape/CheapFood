@@ -20,14 +20,6 @@ app: FastAPI = FastAPI(
     version="0.1.0",
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-
 @app.post("/scrape", response_model=list[MenuCategory])
 async def scrape_endpoint(request: ScrapeRequest) -> list[MenuCategory]:
     """Scrape a restaurant menu from the given URL."""

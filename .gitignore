@@ -17,3 +17,6 @@ media/
 .run_tree/
 *.log
 .scrapy/
+
+
+users.json

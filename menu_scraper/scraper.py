@@ -256,8 +256,27 @@ async def scrape_menu(
             deduped_media.append(mf)
     all_media = deduped_media
 
-    # Скачиваем и обрабатываем PDF-файлы (могут быть с внешних доменов)
+    async def _extract_pdf(media_file: MediaFile, pdf_result: tuple[bytes, Path] | None) -> list[MenuCategory]:
+        if pdf_result is None:
+            return []
+        pdf_data, local_path = pdf_result
+        media_file.local_path = str(local_path)
+        logger.info("LLM: processing PDF %s", media_file.original_url)
+        items = await pdf_extractor.extract(
+            pdf_data, source_url=media_file.original_url, log_dir=pdf_extractor_dir,
+        )
+        logger.info("LLM: done PDF %s — found %d categories", media_file.original_url, len(items))
+        return items
+
+    async def _extract_html(html: str, html_filename: str) -> list[MenuCategory]:
+        logger.info("LLM: processing HTML %s", html_filename)
+        items = await html_extractor.extract(html, filename=html_filename, log_dir=html_extractor_dir)
+        logger.info("LLM: done HTML %s — found %d categories", html_filename, len(items))
+        return items
+
+    # Скачиваем PDF-файлы параллельно
     pdf_media: list[MediaFile] = [m for m in all_media if m.media_type == MenuSourceType.PDF]
+    pdf_results: list[tuple[bytes, Path] | None] = []
     if pdf_media:
         await _progress(f"Downloading {len(pdf_media)} PDF file(s)...")
         async with httpx.AsyncClient(
@@ -265,28 +284,27 @@ async def scrape_menu(
             timeout=float(timeout),
             headers={"User-Agent": USER_AGENT},
         ) as pdf_client:
-            pdf_tasks = [_download_pdf(pdf_client, m.original_url, pdf_extractor_dir) for m in pdf_media]
-            pdf_results = await asyncio.gather(*pdf_tasks)
+            pdf_dl_tasks = [_download_pdf(pdf_client, m.original_url, pdf_extractor_dir) for m in pdf_media]
+            pdf_results = list(await asyncio.gather(*pdf_dl_tasks))
 
-        for i, (media_file, pdf_result) in enumerate(zip(pdf_media, pdf_results), start=1):
-            if pdf_result is None:
-                continue
-            pdf_data, local_path = pdf_result
-            media_file.local_path = str(local_path)
-            await _progress(f"Extracting menu from PDF {i}/{len(pdf_media)}...")
-            logger.info("LLM: processing PDF %s", media_file.original_url)
-            items = await pdf_extractor.extract(
-                pdf_data, source_url=media_file.original_url, log_dir=pdf_extractor_dir,
-            )
-            logger.info("LLM: done PDF %s — found %d categories", media_file.original_url, len(items))
-            all_categories.extend(items)
+    total = len(pdf_media) + len(pending_texts)
+    completed = 0
 
-    for i, (html, html_filename) in enumerate(pending_texts, start=1):
-        await _progress(f"Extracting menu from page {i}/{len(pending_texts)}...")
-        logger.info("LLM: processing HTML %s", html_filename)
-        items = await html_extractor.extract(html, filename=html_filename, log_dir=html_extractor_dir)
-        logger.info("LLM: done HTML %s — found %d categories", html_filename, len(items))
-        all_categories.extend(items)
+    async def _tracked(coro: Coroutine[None, None, list[MenuCategory]], label: str) -> list[MenuCategory]:
+        nonlocal completed
+        result = await coro
+        completed += 1
+        await _progress(f"Extracted menu from ({completed}/{total})")
+        return result
+
+    if total > 0:
+        await _progress(f"Extracting menu from {total} sources...")
+
+    pdf_extract_tasks = [_tracked(_extract_pdf(mf, res), mf.original_url) for mf, res in zip(pdf_media, pdf_results)]
+    html_extract_tasks = [_tracked(_extract_html(html, fname), fname) for html, fname in pending_texts]
+    all_results = await asyncio.gather(*pdf_extract_tasks, *html_extract_tasks)
+    for categories in all_results:
+        all_categories.extend(categories)
 
     # Слияние категорий с одинаковым именем + дедупликация блюд по имени
     merged: dict[str | None, list] = {}

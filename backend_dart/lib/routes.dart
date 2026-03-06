@@ -5,15 +5,38 @@ import 'dart:io';
 import 'package:common_dart/common_dart.dart';
 import 'package:http/http.dart' as http;
 import 'package:shelf/shelf.dart';
+import 'package:shelf_rate_limiter/shelf_rate_limiter.dart';
 import 'package:shelf_router/shelf_router.dart';
 
 import 'config.dart';
 import 'exchange_rate_cache.dart';
 import 'menu_cache.dart';
 import 'translation_service.dart';
+import 'user_service.dart';
 
-Router buildRouter({required MenuCache menuCache, required ExchangeRateCache rateCache, required TranslationService translationService}) {
+Response _unauthorized([String message = 'Unauthorized']) =>
+    Response(401, body: jsonEncode({'error': message}), headers: {'Content-Type': 'application/json'});
+
+/// Extracts and verifies Bearer token, returns login or null.
+String? _extractLogin(Request request, UserService userService) {
+  final header = request.headers['authorization'] ?? '';
+  if (!header.startsWith('Bearer ')) return null;
+  return userService.verifyToken(header.substring(7));
+}
+
+Router buildRouter({
+  required MenuCache menuCache,
+  required ExchangeRateCache rateCache,
+  required TranslationService translationService,
+  required UserService userService,
+}) {
   final router = Router();
+
+  final authRateLimiter = ShelfRateLimiter(
+    storage: MemStorage(),
+    duration: const Duration(minutes: 1),
+    maxRequests: 10,
+  );
 
   router.post('/scrape/stream', (Request request) async {
     final body = await request.readAsString();
@@ -149,6 +172,88 @@ Router buildRouter({required MenuCache menuCache, required ExchangeRateCache rat
       },
       context: {'shelf.io.buffer_output': false},
     );
+  });
+
+  // Auth routes — with rate limiting
+  final authRouter = Router();
+
+  authRouter.post('/register', (Request request) async {
+    final body = jsonDecode(await request.readAsString()) as Map<String, dynamic>;
+    final login = body['login'] as String?;
+    final password = body['password'] as String?;
+    if (login == null || login.isEmpty || password == null || password.isEmpty) {
+      return Response(400, body: jsonEncode({'error': 'login and password required'}), headers: {'Content-Type': 'application/json'});
+    }
+    final allowed = allowedUsername;
+    if (allowed != null && login != allowed) {
+      return Response(403, body: jsonEncode({'error': 'registration not allowed'}), headers: {'Content-Type': 'application/json'});
+    }
+    final user = userService.register(login, password);
+    if (user == null) {
+      return Response(409, body: jsonEncode({'error': 'login already taken'}), headers: {'Content-Type': 'application/json'});
+    }
+    final token = userService.issueToken(user.login);
+    return Response.ok(jsonEncode({'token': token, 'login': user.login, 'urls': user.urls}), headers: {'Content-Type': 'application/json'});
+  });
+
+  authRouter.post('/login', (Request request) async {
+    final body = jsonDecode(await request.readAsString()) as Map<String, dynamic>;
+    final login = body['login'] as String?;
+    final password = body['password'] as String?;
+    if (login == null || password == null) {
+      return Response(400, body: jsonEncode({'error': 'login and password required'}), headers: {'Content-Type': 'application/json'});
+    }
+    final allowed = allowedUsername;
+    if (allowed != null && login != allowed) {
+      return Response(401, body: jsonEncode({'error': 'invalid credentials'}), headers: {'Content-Type': 'application/json'});
+    }
+    final user = userService.authenticate(login, password);
+    if (user == null) {
+      return Response(401, body: jsonEncode({'error': 'invalid credentials'}), headers: {'Content-Type': 'application/json'});
+    }
+    final token = userService.issueToken(user.login);
+    return Response.ok(jsonEncode({'token': token, 'login': user.login, 'urls': user.urls}), headers: {'Content-Type': 'application/json'});
+  });
+
+  final authHandler = Pipeline()
+      .addMiddleware(authRateLimiter.rateLimiter())
+      .addHandler(authRouter.call);
+
+  router.mount('/auth', authHandler);
+
+  // Restaurant routes — JWT protected
+  router.get('/restaurants', (Request request) async {
+    final login = _extractLogin(request, userService);
+    if (login == null) return _unauthorized();
+    final user = userService.getUser(login);
+    if (user == null) return _unauthorized('User not found');
+    return Response.ok(jsonEncode({'urls': user.urls}), headers: {'Content-Type': 'application/json'});
+  });
+
+  router.post('/restaurants', (Request request) async {
+    final login = _extractLogin(request, userService);
+    if (login == null) return _unauthorized();
+    final body = jsonDecode(await request.readAsString()) as Map<String, dynamic>;
+    final url = body['url'] as String?;
+    if (url == null || url.isEmpty) {
+      return Response(400, body: jsonEncode({'error': 'url required'}), headers: {'Content-Type': 'application/json'});
+    }
+    final user = userService.addUrl(login, url);
+    if (user == null) return _unauthorized('User not found');
+    return Response.ok(jsonEncode({'urls': user.urls}), headers: {'Content-Type': 'application/json'});
+  });
+
+  router.delete('/restaurants', (Request request) async {
+    final login = _extractLogin(request, userService);
+    if (login == null) return _unauthorized();
+    final body = jsonDecode(await request.readAsString()) as Map<String, dynamic>;
+    final url = body['url'] as String?;
+    if (url == null || url.isEmpty) {
+      return Response(400, body: jsonEncode({'error': 'url required'}), headers: {'Content-Type': 'application/json'});
+    }
+    final user = userService.removeUrl(login, url);
+    if (user == null) return _unauthorized('User not found');
+    return Response.ok(jsonEncode({'urls': user.urls}), headers: {'Content-Type': 'application/json'});
   });
 
   router.get('/health', (Request _) async {
