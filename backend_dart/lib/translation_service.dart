@@ -10,34 +10,28 @@ const String _openaiModel = 'gpt-5-mini';
 
 class TranslationService {
   /// Returns [categories] translated to [language] (BCP-47 tag, e.g. 'en', 'ru').
+  /// Each category is translated in a separate parallel request.
   Future<List<MenuCategory>> translate({
     required String language,
     required List<MenuCategory> categories,
   }) async {
-    // Flatten all items to translate in one batch
-    final allItems = categories.expand((c) => c.items).toList();
-    print('Translating ${allItems.length} items to $language via OpenAI $_openaiModel');
-    final translatedItems = await _callOpenAI(items: allItems, language: language);
-
-    // Rebuild categories with translated items
-    int offset = 0;
-    return categories.map((c) {
-      final slice = translatedItems.sublist(offset, offset + c.items.length);
-      offset += c.items.length;
-      return MenuCategory(name: c.name, items: slice);
-    }).toList();
+    final totalItems = categories.fold(0, (sum, c) => sum + c.items.length);
+    print('Translating ${categories.length} categories ($totalItems items) to $language via OpenAI $_openaiModel (parallel)');
+    return Future.wait(categories.map((c) => _translateCategory(c, language)));
   }
 
-  Future<List<MenuItem>> _callOpenAI({required List<MenuItem> items, required String language}) async {
-    // Build compact input: only name + description need translation.
-    final input = items.map((i) => {'name': i.name, if (i.description != null) 'description': i.description}).toList();
+  Future<MenuCategory> _translateCategory(MenuCategory category, String language) async {
+    // Compact format: [categoryName, [[name, description|null], ...]]
+    // null categoryName if absent.
+    final inputItems = category.items.map((i) => [i.name, i.description]).toList();
+    final input = [category.name, inputItems];
 
     final prompt = '''
-You are a menu translator. Translate the following menu items to the language with BCP-47 tag "$language".
-Return ONLY a raw JSON array (starting with "[") with the same number of objects, each having "name" and optionally "description" (only if the original has a description).
-Do not wrap it in an object. Do not add any extra text, markdown, or code fences.
+You are a menu translator. Translate the following menu category to the language with BCP-47 tag "$language".
+Input is a JSON array: [categoryName, [[name, description], ...]] where categoryName or description may be null.
+Return ONLY a raw JSON array in the same format with translated strings. Keep null values as null. No extra text or code fences.
 
-Input JSON:
+Input:
 ${jsonEncode(input)}
 ''';
 
@@ -70,40 +64,34 @@ ${jsonEncode(input)}
     final choice = choices.first as Map<String, dynamic>;
     final finishReason = choice['finish_reason'] as String?;
     if (finishReason == 'length') {
-      throw Exception('OpenAI hit token limit — batch too large (${items.length} items)');
+      throw Exception('OpenAI hit token limit — category "${category.name}" too large (${category.items.length} items)');
     }
 
     final text = choice['message']['content'] as String;
+    print('OpenAI raw content for "${category.name}": $text');
 
-    print('OpenAI raw content: $text');
-    dynamic parsed = jsonDecode(text);
-    List<dynamic> translated;
-    if (parsed is List) {
-      translated = parsed;
-    } else if (parsed is Map) {
-      final listValue = parsed.values.whereType<List>().firstOrNull;
-      if (listValue != null) {
-        translated = listValue;
-      } else {
-        throw Exception('OpenAI response Map has no List value: $parsed');
-      }
-    } else {
-      throw Exception('Unexpected OpenAI response shape: $parsed');
+    final start = text.indexOf('[');
+    final end = text.lastIndexOf(']');
+    if (start == -1 || end == -1) throw Exception('No JSON array found in OpenAI response: $text');
+    final parsed = jsonDecode(text.substring(start, end + 1)) as List<dynamic>;
+    final translatedName = parsed[0] as String? ?? category.name;
+    final rawItems = parsed[1] as List<dynamic>;
+
+    if (rawItems.length != category.items.length) {
+      throw Exception('OpenAI returned ${rawItems.length} items, expected ${category.items.length} for category "${category.name}"');
     }
 
-    if (translated.length != items.length) {
-      throw Exception('OpenAI returned ${translated.length} items, expected ${items.length}');
-    }
-
-    return List.generate(items.length, (i) {
-      final t = translated[i] as Map<String, dynamic>;
-      final original = items[i];
+    final translatedItems = List.generate(category.items.length, (i) {
+      final t = rawItems[i] as List<dynamic>;
+      final original = category.items[i];
       return MenuItem(
-        name: (t['name'] as String?) ?? original.name,
-        description: (t['description'] as String?) ?? original.description,
+        name: (t[0] as String?) ?? original.name,
+        description: (t[1] as String?) ?? original.description,
         price: original.price,
         currency: original.currency,
       );
     });
+
+    return MenuCategory(name: translatedName, items: translatedItems);
   }
 }
