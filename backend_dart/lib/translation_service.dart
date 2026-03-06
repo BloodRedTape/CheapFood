@@ -6,17 +6,14 @@ import 'package:http/http.dart' as http;
 import 'config.dart';
 
 const String _openaiApiUrl = 'https://api.openai.com/v1/chat/completions';
-const String _openaiModel = 'gpt-5-mini';
+const List<String> _openaiModels = ['gpt-4.1-mini', 'gpt-4.1'];
 
 class TranslationService {
   /// Returns [categories] translated to [language] (BCP-47 tag, e.g. 'en', 'ru').
   /// Each category is translated in a separate parallel request.
-  Future<List<MenuCategory>> translate({
-    required String language,
-    required List<MenuCategory> categories,
-  }) async {
+  Future<List<MenuCategory>> translate({required String language, required List<MenuCategory> categories}) async {
     final totalItems = categories.fold(0, (sum, c) => sum + c.items.length);
-    print('Translating ${categories.length} categories ($totalItems items) to $language via OpenAI $_openaiModel (parallel)');
+    print('Translating ${categories.length} categories ($totalItems items) to $language via OpenAI (parallel)');
     return Future.wait(categories.map((c) => _translateCategory(c, language)));
   }
 
@@ -48,48 +45,61 @@ Return ONLY a raw JSON array of the same length with translated strings. No extr
 
 ${jsonEncode(strings)}''';
 
-    final body = jsonEncode({
-      'model': _openaiModel,
-      'temperature': 1.0,
-      'messages': [
-        {'role': 'user', 'content': prompt},
-      ],
-    });
+    List<dynamic>? translated;
+    for (final model in _openaiModels) {
+      final body = jsonEncode({
+        'model': model,
+        'temperature': 1.0,
+        'messages': [
+          {'role': 'user', 'content': prompt},
+        ],
+      });
 
-    final response = await http.post(
-      Uri.parse(_openaiApiUrl),
-      headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer $openaiApiKey'},
-      body: body,
-    );
+      final response = await http.post(
+        Uri.parse(_openaiApiUrl),
+        headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer $openaiApiKey'},
+        body: body,
+      );
 
-    if (response.statusCode != 200) {
-      print('OpenAI error body: ${response.body}');
-      throw Exception('OpenAI API error: ${response.statusCode}');
+      if (response.statusCode != 200) {
+        print('OpenAI error body: ${response.body}');
+        throw Exception('OpenAI API error: ${response.statusCode}');
+      }
+
+      final responseJson = jsonDecode(response.body) as Map<String, dynamic>;
+      final choices = responseJson['choices'] as List?;
+      if (choices == null || choices.isEmpty) {
+        throw Exception('OpenAI returned no choices');
+      }
+
+      final choice = choices.first as Map<String, dynamic>;
+      final finishReason = choice['finish_reason'] as String?;
+      if (finishReason == 'length') {
+        throw Exception('OpenAI hit token limit — category "${category.name}" too large (${category.items.length} items)');
+      }
+
+      final text = choice['message']['content'] as String;
+      print('OpenAI ($model) raw content for "${category.name}": $text');
+
+      final start = text.indexOf('[');
+      final end = text.lastIndexOf(']');
+      if (start == -1 || end == -1) {
+        print('Warning: no JSON array in response from $model for "${category.name}", trying next model');
+        continue;
+      }
+
+      final candidate = jsonDecode(text.substring(start, end + 1)) as List<dynamic>;
+      if (candidate.length != strings.length) {
+        print('Warning: $model returned ${candidate.length} strings, expected ${strings.length} for "${category.name}", trying next model');
+        continue;
+      }
+
+      translated = candidate;
+      break;
     }
 
-    final responseJson = jsonDecode(response.body) as Map<String, dynamic>;
-
-    final choices = responseJson['choices'] as List?;
-    if (choices == null || choices.isEmpty) {
-      throw Exception('OpenAI returned no choices');
-    }
-
-    final choice = choices.first as Map<String, dynamic>;
-    final finishReason = choice['finish_reason'] as String?;
-    if (finishReason == 'length') {
-      throw Exception('OpenAI hit token limit — category "${category.name}" too large (${category.items.length} items)');
-    }
-
-    final text = choice['message']['content'] as String;
-    print('OpenAI raw content for "${category.name}": $text');
-
-    final start = text.indexOf('[');
-    final end = text.lastIndexOf(']');
-    if (start == -1 || end == -1) throw Exception('No JSON array found in OpenAI response: $text');
-    final translated = jsonDecode(text.substring(start, end + 1)) as List<dynamic>;
-
-    if (translated.length != strings.length) {
-      throw Exception('OpenAI returned ${translated.length} strings, expected ${strings.length} for category "${category.name}"');
+    if (translated == null) {
+      throw Exception('All models failed to translate category "${category.name}"');
     }
 
     // Reconstruct category from translated strings using slots.
@@ -111,11 +121,7 @@ ${jsonEncode(strings)}''';
 
     final translatedItems = List.generate(category.items.length, (i) {
       final original = category.items[i];
-      return MenuItem(
-        name: translatedNames[i],
-        description: translatedDescs[i],
-        variations: original.variations,
-      );
+      return MenuItem(name: translatedNames[i], description: translatedDescs[i], variations: original.variations);
     });
 
     return MenuCategory(name: translatedCategoryName, items: translatedItems);
