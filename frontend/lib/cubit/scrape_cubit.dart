@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'package:common_dart/common_dart.dart';
 import 'package:fetch_client/fetch_client.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:http/http.dart' as http;
+import 'package:http/http.dart' as http; // needed for http.Request
 
 sealed class ScrapeState {}
 
@@ -77,7 +77,6 @@ class ScrapeCubit extends Cubit<ScrapeState> {
       String? eventData;
 
       await for (final chunk in stream) {
-        print('[sse] chunk ${chunk.length} bytes: ${utf8.decode(chunk, allowMalformed: true)}');
         buffer += utf8.decode(chunk);
         final lines = buffer.split('\n');
         buffer = lines.last;
@@ -93,33 +92,22 @@ class ScrapeCubit extends Cubit<ScrapeState> {
             } else if (eventType == 'error') {
               emit(ScrapeFailure(eventData));
               return;
+            } else if (eventType == 'result') {
+              final scrapeResponse = ScrapeResponse.fromJson(jsonDecode(eventData) as Map<String, dynamic>);
+              emit(
+                ScrapeSuccess(
+                  categories: scrapeResponse.categories,
+                  exchangeRates: scrapeResponse.exchangeRates,
+                  selectedCurrency: selectedCurrency,
+                  language: language ?? '',
+                ),
+              );
+              return;
             }
             eventType = null;
             eventData = null;
           }
         }
-      }
-
-      // Phase 2: fetch full result (translation + exchange rates) from backend cache
-      emit(ScrapeStreaming('Finishing up...'));
-      final response = await http.post(
-        Uri.parse('$_backendUrl/scrape'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode(ScrapeRequest(url: url.trim(), language: language, forceRefresh: false).toJson()),
-      );
-
-      if (response.statusCode == 200) {
-        final scrapeResponse = ScrapeResponse.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
-        emit(
-          ScrapeSuccess(
-            categories: scrapeResponse.categories,
-            exchangeRates: scrapeResponse.exchangeRates,
-            selectedCurrency: selectedCurrency,
-            language: language ?? '',
-          ),
-        );
-      } else {
-        emit(ScrapeFailure('Server error: ${response.statusCode}'));
       }
     } catch (e) {
       emit(ScrapeFailure('Connection failed: $e'));

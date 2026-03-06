@@ -12,14 +12,10 @@ import 'exchange_rate_cache.dart';
 import 'menu_cache.dart';
 import 'translation_service.dart';
 
-Router buildRouter({
-  required MenuCache menuCache,
-  required ExchangeRateCache rateCache,
-  required TranslationService translationService,
-}) {
+Router buildRouter({required MenuCache menuCache, required ExchangeRateCache rateCache, required TranslationService translationService}) {
   final router = Router();
 
-  router.post('/scrape', (Request request) async {
+  router.post('/scrape/stream', (Request request) async {
     final body = await request.readAsString();
     final requestJson = jsonDecode(body) as Map<String, dynamic>;
     final url = requestJson['url'] as String;
@@ -28,97 +24,62 @@ Router buildRouter({
 
     if (forceRefresh) menuCache.clearUrl(url);
 
-    // Always scrape/cache in original language
-    var categories = menuCache.readOriginal(url);
-
-    if (categories == null) {
-      final scraperResponse = await http.post(
-        Uri.parse('$scraperUrl/scrape'),
-        headers: {'Content-Type': 'application/json'},
-        body: body,
-      );
-
-      if (scraperResponse.statusCode != 200) {
-        return Response(
-          scraperResponse.statusCode,
-          body: scraperResponse.body,
-          headers: {'Content-Type': 'application/json'},
-        );
-      }
-
-      final rawCategories = jsonDecode(scraperResponse.body) as List<dynamic>;
-      categories = rawCategories
-          .map((e) => MenuCategory.fromJson(e as Map<String, dynamic>))
-          .toList();
-      menuCache.writeOriginal(url, categories);
-    }
-
-    // Translate if requested
-    if (language != null && language.isNotEmpty) {
-      final cached = menuCache.readTranslated(url, language);
-      if (cached != null) {
-        categories = cached;
-      } else {
-        try {
-          categories = await translationService.translate(
-            language: language,
-            categories: categories,
-          );
-          menuCache.writeTranslated(url, language, categories);
-        } catch (e, st) {
-          print('Translation error: $e\n$st');
-          return Response.internalServerError(
-            body: jsonEncode({'error': 'Translation failed: $e'}),
-            headers: {'Content-Type': 'application/json'},
-          );
-        }
-      }
-    }
-
-    final allVariations = categories.expand((c) => c.items).expand((i) => i.variations).toList();
-    final base = allVariations
-        .firstWhere(
-          (v) => v.currency.isNotEmpty,
-          orElse: () => const MenuItemVariation(currency: 'USD'),
-        )
-        .currency;
-
-    final ExchangeRates exchangeRates;
-    try {
-      exchangeRates = await rateCache.getRates(base);
-    } catch (e) {
-      return Response.internalServerError(
-        body: jsonEncode({'error': e.toString()}),
-        headers: {'Content-Type': 'application/json'},
-      );
-    }
-
-    final filteredRates = Map.fromEntries(
-      exchangeRates.rates.entries
-          .where((e) => allowedCurrencies.contains(e.key)),
-    );
-    final filteredExchangeRates = ExchangeRates(
-      base: exchangeRates.base,
-      rates: filteredRates,
-    );
-
-    final scrapeResponse = ScrapeResponse(
-      categories: categories,
-      exchangeRates: filteredExchangeRates,
-    );
-
-    return Response.ok(
-      jsonEncode(scrapeResponse.toJson()),
-      headers: {'Content-Type': 'application/json'},
-    );
-  });
-
-  router.post('/scrape/stream', (Request request) async {
-    final body = await request.readAsString();
-
     final controller = StreamController<List<int>>();
 
+    // Shared: translate + exchange rates + emit result, then close controller
+    Future<void> finishWithCategories(List<MenuCategory> categories) async {
+      if (language != null && language.isNotEmpty) {
+        final cached = menuCache.readTranslated(url, language);
+        if (cached != null) {
+          categories = cached;
+        } else {
+          try {
+            controller.add(utf8.encode('event: progress\ndata: Translating menu to $language...\n\n'));
+            categories = await translationService.translate(language: language, categories: categories);
+            menuCache.writeTranslated(url, language, categories);
+          } catch (e) {
+            controller.add(utf8.encode('event: error\ndata: Translation failed: $e\n\n'));
+            await controller.close();
+            return;
+          }
+        }
+      }
+
+      final base =
+          categories
+              .expand((c) => c.items)
+              .expand((i) => i.variations)
+              .firstWhere((v) => v.currency.isNotEmpty, orElse: () => const MenuItemVariation(currency: 'USD'))
+              .currency;
+
+      controller.add(utf8.encode('event: progress\ndata: Fetching exchange rates for $base...\n\n'));
+      try {
+        final raw = await rateCache.getRates(base);
+        final filteredRates = Map.fromEntries(raw.rates.entries.where((e) => allowedCurrencies.contains(e.key)));
+        final exchangeRates = ExchangeRates(base: raw.base, rates: filteredRates);
+        final payload = jsonEncode(ScrapeResponse(categories: categories, exchangeRates: exchangeRates).toJson());
+        controller.add(utf8.encode('event: result\ndata: $payload\n\n'));
+      } catch (e) {
+        controller.add(utf8.encode('event: error\ndata: Exchange rates failed: $e\n\n'));
+      }
+      await controller.close();
+    }
+
     Future<void> forward() async {
+      // Check cache first — skip scraper if already cached
+      final translatedCached = language != null && language.isNotEmpty ? menuCache.readTranslated(url, language) : null;
+
+      if (translatedCached != null) {
+        await finishWithCategories(translatedCached);
+        return;
+      }
+
+      final originalCached = menuCache.readOriginal(url);
+      if (originalCached != null) {
+        await finishWithCategories(originalCached);
+        return;
+      }
+
       final uri = Uri.parse('$scraperUrl/scrape/stream');
       final ioClient = HttpClient()..autoUncompress = false;
       final ioRequest = await ioClient.postUrl(uri);
@@ -126,10 +87,44 @@ Router buildRouter({
       ioRequest.write(body);
       final ioResponse = await ioRequest.close();
 
+      String buffer = '';
+      String? eventType;
+      String? eventData;
+
       await for (final chunk in ioResponse) {
         if (controller.isClosed) break;
-        controller.add(chunk);
+
+        buffer += utf8.decode(chunk);
+        final lines = buffer.split('\n');
+        buffer = lines.last;
+
+        for (final line in lines.sublist(0, lines.length - 1)) {
+          if (line.startsWith('event: ')) {
+            eventType = line.substring(7).trim();
+          } else if (line.startsWith('data: ')) {
+            eventData = line.substring(6).trim();
+          } else if (line.isEmpty && eventType != null && eventData != null) {
+            if (eventType == 'progress') {
+              controller.add(utf8.encode('event: progress\ndata: $eventData\n\n'));
+            } else if (eventType == 'error') {
+              controller.add(utf8.encode('event: error\ndata: $eventData\n\n'));
+              await controller.close();
+              ioClient.close();
+              return;
+            } else if (eventType == 'result') {
+              final rawCategories = jsonDecode(eventData) as List<dynamic>;
+              final categories = rawCategories.map((e) => MenuCategory.fromJson(e as Map<String, dynamic>)).toList();
+              menuCache.writeOriginal(url, categories);
+              ioClient.close();
+              await finishWithCategories(categories);
+              return;
+            }
+            eventType = null;
+            eventData = null;
+          }
+        }
       }
+
       await controller.close();
       ioClient.close();
     }
@@ -157,10 +152,7 @@ Router buildRouter({
   });
 
   router.get('/health', (Request _) async {
-    return Response.ok(
-      jsonEncode({'status': 'ok'}),
-      headers: {'Content-Type': 'application/json'},
-    );
+    return Response.ok(jsonEncode({'status': 'ok'}), headers: {'Content-Type': 'application/json'});
   });
 
   return router;
