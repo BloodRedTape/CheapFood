@@ -52,6 +52,8 @@ final class ScrapeFailure extends ScrapeState {
 class ScrapeCubit extends Cubit<ScrapeState> {
   static const String _backendUrl = 'http://localhost:8080';
 
+  String selectedCurrency = supportedCurrencies.first;
+
   ScrapeCubit() : super(ScrapeInitial());
 
   Future<void> scrape(String url, {String? language}) async {
@@ -73,7 +75,7 @@ class ScrapeCubit extends Cubit<ScrapeState> {
         emit(ScrapeSuccess(
           items: scrapeResponse.items,
           exchangeRates: scrapeResponse.exchangeRates,
-          selectedCurrency: scrapeResponse.exchangeRates.base,
+          selectedCurrency: selectedCurrency,
           language: language ?? '',
         ));
       } else {
@@ -85,6 +87,7 @@ class ScrapeCubit extends Cubit<ScrapeState> {
   }
 
   void selectCurrency(String currency) {
+    selectedCurrency = currency;
     final current = state;
     if (current is ScrapeSuccess) {
       emit(current.withCurrency(currency));

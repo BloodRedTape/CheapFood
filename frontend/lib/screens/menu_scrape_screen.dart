@@ -12,15 +12,13 @@ class MenuScrapeScreen extends StatefulWidget {
   State<MenuScrapeScreen> createState() => _MenuScrapeScreenState();
 }
 
-const List<(String, String)> _languages = [
-  ('Original', ''),
-  ('English', 'en'),
-  ('Russian', 'ru'),
-  ('Czech', 'cs'),
-  ('Ukrainian', 'uk'),
-  ('German', 'de'),
-  ('French', 'fr'),
-  ('Spanish', 'es'),
+const List<(String, String, String)> _languages = [
+  ('🌐', 'Original', ''),
+  ('🇬🇧', 'English', 'en'),
+  ('🇷🇺', 'Russian', 'ru'),
+  ('🇨🇿', 'Czech', 'cs'),
+  ('🇺🇦', 'Ukrainian', 'uk'),
+  ('🇵🇱', 'Polish', 'pl'),
 ];
 
 class _MenuScrapeScreenState extends State<MenuScrapeScreen> {
@@ -34,10 +32,7 @@ class _MenuScrapeScreenState extends State<MenuScrapeScreen> {
   }
 
   void _submit(BuildContext context) {
-    context.read<ScrapeCubit>().scrape(
-          _urlController.text,
-          language: _selectedLanguage.isEmpty ? null : _selectedLanguage,
-        );
+    context.read<ScrapeCubit>().scrape(_urlController.text, language: _selectedLanguage.isEmpty ? null : _selectedLanguage);
   }
 
   @override
@@ -48,18 +43,10 @@ class _MenuScrapeScreenState extends State<MenuScrapeScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('CheapFood', style: ShadTheme.of(context).textTheme.h2),
-            const SizedBox(height: 24),
             Row(
               children: [
-                Expanded(
-                  child: ShadInput(
-                    controller: _urlController,
-                    placeholder: const Text('https://example.com/menu'),
-                    onSubmitted: (_) => _submit(context),
-                  ),
-                ),
-                const SizedBox(width: 12),
+                Text('CheapFood', style: ShadTheme.of(context).textTheme.h2),
+                const Spacer(),
                 ShadSelect<String>(
                   initialValue: _selectedLanguage,
                   onChanged: (value) {
@@ -67,48 +54,62 @@ class _MenuScrapeScreenState extends State<MenuScrapeScreen> {
                       setState(() => _selectedLanguage = value);
                     }
                   },
-                  options: _languages
-                      .map((l) => ShadOption(value: l.$2, child: Text(l.$1)))
-                      .toList(),
+                  options: _languages.map((l) => ShadOption(value: l.$3, child: Text('${l.$1} ${l.$2}'))).toList(),
                   selectedOptionBuilder: (context, value) {
-                    final label = _languages
-                        .firstWhere((l) => l.$2 == value,
-                            orElse: () => _languages.first)
-                        .$1;
-                    return Text(label);
+                    final flag = _languages.firstWhere((l) => l.$3 == value, orElse: () => _languages.first).$1;
+                    return Text(flag);
                   },
+                ),
+                const SizedBox(width: 8),
+                const _CurrencySelect(),
+              ],
+            ),
+            const SizedBox(height: 24),
+            Row(
+              children: [
+                Expanded(
+                  child: ShadInput(controller: _urlController, placeholder: const Text('https://example.com/menu'), onSubmitted: (_) => _submit(context)),
                 ),
                 const SizedBox(width: 12),
                 BlocBuilder<ScrapeCubit, ScrapeState>(
-                  buildWhen: (prev, curr) =>
-                      (prev is ScrapeLoading) != (curr is ScrapeLoading),
-                  builder: (context, state) => ShadButton(
-                    onPressed: state is ScrapeLoading
-                        ? null
-                        : () => _submit(context),
-                    child: const Text('Search'),
-                  ),
+                  buildWhen: (prev, curr) => (prev is ScrapeLoading) != (curr is ScrapeLoading),
+                  builder: (context, state) => ShadButton(onPressed: state is ScrapeLoading ? null : () => _submit(context), child: const Text('Search')),
                 ),
               ],
             ),
             const SizedBox(height: 16),
             Expanded(
               child: BlocBuilder<ScrapeCubit, ScrapeState>(
-                builder: (context, state) => switch (state) {
-                  ScrapeInitial() => const SizedBox.shrink(),
-                  ScrapeLoading() =>
-                    const Center(child: CircularProgressIndicator()),
-                  ScrapeFailure(:final message) => ShadAlert.destructive(
-                      title: const Text('Error'),
-                      description: Text(message),
-                    ),
-                  ScrapeSuccess() => _SuccessView(state: state),
-                },
+                builder:
+                    (context, state) => switch (state) {
+                      ScrapeInitial() => const SizedBox.shrink(),
+                      ScrapeLoading() => const Center(child: CircularProgressIndicator()),
+                      ScrapeFailure(:final message) => ShadAlert.destructive(title: const Text('Error'), description: Text(message)),
+                      ScrapeSuccess() => _SuccessView(state: state),
+                    },
               ),
             ),
           ],
         ),
       ),
+    );
+  }
+}
+
+class _CurrencySelect extends StatelessWidget {
+  const _CurrencySelect();
+
+  @override
+  Widget build(BuildContext context) {
+    final cubit = context.read<ScrapeCubit>();
+    final options = supportedCurrencies.toList()..sort();
+    return ShadSelect<String>(
+      initialValue: cubit.selectedCurrency,
+      onChanged: (value) {
+        if (value != null) cubit.selectCurrency(value);
+      },
+      options: options.map((c) => ShadOption(value: c, child: Text(c))).toList(),
+      selectedOptionBuilder: (context, value) => Text(value),
     );
   }
 }
@@ -123,22 +124,6 @@ class _SuccessView extends StatefulWidget {
 }
 
 class _SuccessViewState extends State<_SuccessView> {
-  late final List<String> _currencies;
-  late final List<ShadOption<String>> _options;
-
-  @override
-  void initState() {
-    super.initState();
-    _currencies = ({
-      widget.state.exchangeRates.base,
-      ...widget.state.exchangeRates.rates.keys,
-    }).toList()
-      ..sort();
-    _options = _currencies
-        .map((c) => ShadOption(value: c, child: Text(c)))
-        .toList();
-  }
-
   @override
   Widget build(BuildContext context) {
     return BlocBuilder<ScrapeCubit, ScrapeState>(
@@ -147,25 +132,7 @@ class _SuccessViewState extends State<_SuccessView> {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                Text(
-                  '${state.items.length} items found',
-                  style: ShadTheme.of(context).textTheme.muted,
-                ),
-                const Spacer(),
-                ShadSelect<String>(
-                  initialValue: state.selectedCurrency,
-                  onChanged: (value) {
-                    if (value != null) {
-                      context.read<ScrapeCubit>().selectCurrency(value);
-                    }
-                  },
-                  options: _options,
-                  selectedOptionBuilder: (context, value) => Text(value),
-                ),
-              ],
-            ),
+            Text('${state.items.length} items found', style: ShadTheme.of(context).textTheme.muted),
             const SizedBox(height: 12),
             Expanded(
               child: ListView.separated(
@@ -173,11 +140,7 @@ class _SuccessViewState extends State<_SuccessView> {
                 separatorBuilder: (_, __) => const Divider(),
                 itemBuilder: (context, index) {
                   final item = state.items[index];
-                  return _MenuItemCard(
-                    item: item,
-                    convertedPrice: state.convertPrice(item.price, item.currency),
-                    displayCurrency: state.selectedCurrency,
-                  );
+                  return _MenuItemCard(item: item, convertedPrice: state.convertPrice(item.price, item.currency), displayCurrency: state.selectedCurrency);
                 },
               ),
             ),
@@ -193,11 +156,7 @@ class _MenuItemCard extends StatelessWidget {
   final double? convertedPrice;
   final String displayCurrency;
 
-  const _MenuItemCard({
-    required this.item,
-    required this.convertedPrice,
-    required this.displayCurrency,
-  });
+  const _MenuItemCard({required this.item, required this.convertedPrice, required this.displayCurrency});
 
   @override
   Widget build(BuildContext context) {
@@ -209,22 +168,12 @@ class _MenuItemCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(item.name, style: ShadTheme.of(context).textTheme.p),
-                if (item.description != null)
-                  Text(
-                    item.description!,
-                    style: ShadTheme.of(context).textTheme.muted,
-                  ),
+                if (item.description != null) Text(item.description!, style: ShadTheme.of(context).textTheme.muted),
               ],
             ),
           ),
           if (convertedPrice != null)
-            Text(
-              '${convertedPrice!.toStringAsFixed(2)} $displayCurrency',
-              style: ShadTheme.of(context)
-                  .textTheme
-                  .p
-                  .copyWith(fontWeight: FontWeight.bold),
-            ),
+            Text('${convertedPrice!.toStringAsFixed(2)} $displayCurrency', style: ShadTheme.of(context).textTheme.p.copyWith(fontWeight: FontWeight.bold)),
         ],
       ),
     );
