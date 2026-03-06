@@ -24,7 +24,7 @@ Router buildRouter({
     final language = requestJson['language'] as String?;
 
     // Always scrape/cache in original language
-    var items = menuCache.read(url);
+    var items = menuCache.readOriginal(url);
 
     if (items == null) {
       final scraperResponse = await http.post(
@@ -45,23 +45,28 @@ Router buildRouter({
       items = rawItems
           .map((e) => MenuItem.fromJson(e as Map<String, dynamic>))
           .toList();
-      menuCache.write(url, items);
+      menuCache.writeOriginal(url, items);
     }
 
     // Translate if requested
     if (language != null && language.isNotEmpty) {
-      try {
-        items = await translationService.translate(
-          url: url,
-          language: language,
-          items: items,
-        );
-      } catch (e, st) {
-        print('Translation error: $e\n$st');
-        return Response.internalServerError(
-          body: jsonEncode({'error': 'Translation failed: $e'}),
-          headers: {'Content-Type': 'application/json'},
-        );
+      final cached = menuCache.readTranslated(url, language);
+      if (cached != null) {
+        items = cached;
+      } else {
+        try {
+          items = await translationService.translate(
+            language: language,
+            items: items,
+          );
+          menuCache.writeTranslated(url, language, items);
+        } catch (e, st) {
+          print('Translation error: $e\n$st');
+          return Response.internalServerError(
+            body: jsonEncode({'error': 'Translation failed: $e'}),
+            headers: {'Content-Type': 'application/json'},
+          );
+        }
       }
     }
 

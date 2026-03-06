@@ -9,26 +9,13 @@ const String _geminiApiUrl =
     'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
 
 class TranslationService {
-  /// In-memory cache: (url, language) → translated items.
-  final Map<(String, String), List<MenuItem>> _cache = {};
-
   /// Returns [items] translated to [language] (BCP-47 tag, e.g. 'en', 'ru').
-  /// Results are cached per (url, language) pair.
   Future<List<MenuItem>> translate({
-    required String url,
     required String language,
     required List<MenuItem> items,
   }) async {
-    final key = (url, language);
-    if (_cache.containsKey(key)) {
-      print('Translation cache hit: url=$url lang=$language');
-      return _cache[key]!;
-    }
-
     print('Translating ${items.length} items to $language via Gemini');
-    final translated = await _callGemini(items: items, language: language);
-    _cache[key] = translated;
-    return translated;
+    return _callGemini(items: items, language: language);
   }
 
   Future<List<MenuItem>> _callGemini({
