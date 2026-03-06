@@ -24,6 +24,7 @@ const List<(String, String, String)> _languages = [
 class _MenuScrapeScreenState extends State<MenuScrapeScreen> {
   final TextEditingController _urlController = TextEditingController();
   String _selectedLanguage = '';
+  bool _forceRefresh = false;
 
   @override
   void dispose() {
@@ -32,7 +33,11 @@ class _MenuScrapeScreenState extends State<MenuScrapeScreen> {
   }
 
   void _submit(BuildContext context) {
-    context.read<ScrapeCubit>().scrape(_urlController.text, language: _selectedLanguage.isEmpty ? null : _selectedLanguage);
+    context.read<ScrapeCubit>().scrape(
+      _urlController.text,
+      language: _selectedLanguage.isEmpty ? null : _selectedLanguage,
+      forceRefresh: _forceRefresh,
+    );
   }
 
   @override
@@ -69,6 +74,12 @@ class _MenuScrapeScreenState extends State<MenuScrapeScreen> {
               children: [
                 Expanded(
                   child: ShadInput(controller: _urlController, placeholder: const Text('https://example.com/menu'), onSubmitted: (_) => _submit(context)),
+                ),
+                const SizedBox(width: 12),
+                ShadCheckbox(
+                  value: _forceRefresh,
+                  onChanged: (value) => setState(() => _forceRefresh = value),
+                  label: const Text('Refresh'),
                 ),
                 const SizedBox(width: 12),
                 BlocBuilder<ScrapeCubit, ScrapeState>(

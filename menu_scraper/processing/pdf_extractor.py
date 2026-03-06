@@ -1,76 +1,124 @@
-"""Extract menu items from PDF files using Gemini."""
+"""Extract menu items from PDF files using OpenAI vision."""
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
-import re
 from pathlib import Path
 
-from google import genai
-from google.genai.errors import APIError
-from google.genai.types import Blob, Part
+import fitz  # pymupdf
+from openai import AsyncOpenAI, RateLimitError
 from pydantic import BaseModel, Field
 
 from menu_scraper.models.menu import MenuCategory
+from menu_scraper.processing.prompts import MENU_ITEM_FIELDS, MENU_ITEM_RULES
 
 logger: logging.Logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT: str = """You are a menu parser. You receive a PDF file from a restaurant website.
+SYSTEM_PROMPT: str = f"""You are a menu parser. You receive images of pages from a restaurant menu PDF.
 Extract ALL menu items grouped by category. For each category return:
 - name: category name as written (e.g. "Starters", "Main Course"), or null if no category is apparent
 - items: list of dishes in that category
 
-For each item return:
-- name: dish name exactly as written
-- description: dish description if present, null otherwise
-- price: numeric price if present, null otherwise
-- currency: ISO currency code (USD, EUR, ILS, GBP, etc.), default USD
-- unit: unit of measurement if present (e.g. "L", "ml", "g", "kg", "pcs"), null otherwise
-- unit_size: numeric size/quantity for the unit (e.g. 0.5, 330, 100), null otherwise
+{MENU_ITEM_FIELDS}
 
 Rules:
 - Group items by the section headers/titles found in the PDF
 - If all items belong to no clear category, return a single category with name null
-- Extract every item that looks like a menu dish, even if it has no price
-- Keep original dish names and category names, do not translate
-- If price has comma as decimal separator, convert to dot (e.g. 12,50 -> 12.50)
-- If price is missing or not listed, set price to null
-- unit and unit_size go together: if one is absent, both should be null
-- If no items found, return empty list
-- Do NOT invent items or categories that are not in the text"""
+{MENU_ITEM_RULES}"""
+
+_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "categories": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": ["string", "null"]},
+                    "items": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "name": {"type": "string"},
+                                "description": {"type": ["string", "null"]},
+                                "price": {"type": ["number", "null"]},
+                                "currency": {"type": "string"},
+                                "unit": {"type": ["string", "null"]},
+                                "unit_size": {"type": ["number", "null"]},
+                            },
+                            "required": ["name", "description", "price", "currency", "unit", "unit_size"],
+                            "additionalProperties": False,
+                        },
+                    },
+                },
+                "required": ["name", "items"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    "required": ["categories"],
+    "additionalProperties": False,
+}
 
 
 class MenuCategoryList(BaseModel):
     categories: list[MenuCategory] = Field(default_factory=list)
 
+def _pdf_to_images(pdf_data: bytes, dpi: int = 300) -> list[str]:
+    """Изменено: dpi увеличено до 300 для лучшего распознавания мелкого текста."""
+    doc: fitz.Document = fitz.open(stream=pdf_data, filetype="pdf")
+    matrix: fitz.Matrix = fitz.Matrix(dpi / 72, dpi / 72)
+    images: list[str] = []
+    for page in doc:
+        pix: fitz.Pixmap = page.get_pixmap(matrix=matrix)
+        png_bytes: bytes = pix.tobytes("png")
+        images.append(base64.b64encode(png_bytes).decode())
+    doc.close()
+    return images
 
 class PdfMenuExtractor:
-    """Extracts menu items from PDF files using Gemini."""
-
     MAX_RETRIES: int = 3
     RETRY_FALLBACK_DELAY: float = 60.0
 
-    def __init__(
-        self,
-        api_key: str,
-        model: str = "gemini-2.5-flash-lite",
-        rpm: int = 10,
-    ) -> None:
-        self._client: genai.Client = genai.Client(api_key=api_key)
+    def __init__(self, api_key: str, model: str = "gpt-4o", rpm: int = 10) -> None:
+        self._client: AsyncOpenAI = AsyncOpenAI(api_key=api_key)
         self._model: str = model
         self._semaphore: asyncio.Semaphore = asyncio.Semaphore(1)
-        self._interval: float = 70.0 / rpm
+        self._interval: float = 60.0 / rpm # Чуть строже, 60 секунд
         self._last_call: float = 0.0
 
     async def extract(
         self, pdf_data: bytes, source_url: str, log_path: Path | None = None,
     ) -> list[MenuCategory]:
-        """Send PDF binary data to Gemini for menu extraction."""
-        logger.info("Extracting menu from PDF: %s (%d bytes)", source_url, len(pdf_data))
-        source_label: str = f"pdf:{source_url}"
-        parts: list[Part] = [
-            Part(inline_data=Blob(data=pdf_data, mime_type="application/pdf")),
-            Part(text=SYSTEM_PROMPT),
+        
+        images: list[str] = await asyncio.to_thread(_pdf_to_images, pdf_data, 300)
+        
+        # Создаем задачи для параллельной обработки каждой страницы
+        tasks = [
+            self._process_single_page(img_b64, i, source_url)
+            for i, img_b64 in enumerate(images, start=1)
+        ]
+        
+        # Ждем выполнения всех страниц
+        pages_results = await asyncio.gather(*tasks)
+        
+        # Объединяем категории со всех страниц
+        all_categories: list[MenuCategory] = []
+        for page_categories in pages_results:
+            if page_categories:
+                all_categories.extend(page_categories)
+                
+        return all_categories
+
+    async def _process_single_page(self, img_b64: str, page_num: int, source_url: str) -> list[MenuCategory]:
+        content = [
+            {"type": "text", "text": SYSTEM_PROMPT},
+            {
+                "type": "image_url",
+                "image_url": {"url": f"data:image/png;base64,{img_b64}", "detail": "high"}
+            }
         ]
 
         for attempt in range(self.MAX_RETRIES):
@@ -79,85 +127,52 @@ class PdfMenuExtractor:
                     now: float = asyncio.get_event_loop().time()
                     wait: float = self._interval - (now - self._last_call)
                     if wait > 0:
-                        logger.info("Rate limit: waiting %.1fs", wait)
                         await asyncio.sleep(wait)
-                    response = await self._client.aio.models.generate_content(
-                        model=self._model,
-                        contents=parts,
-                        config={
-                            "response_mime_type": "application/json",
-                            "response_schema": MenuCategoryList,
-                        },
-                    )
+                    
+                    # ОБНОВЛЯЕМ ДО СЕТЕВОГО ВЫЗОВА, чтобы следующие таски считали wait правильно
                     self._last_call = asyncio.get_event_loop().time()
 
-                response_text: str = response.text or ""
-                logger.info("Gemini response for %s: %s", source_label, response_text)
-                result: MenuCategoryList = MenuCategoryList.model_validate_json(response_text)
-                total = sum(len(c.items) for c in result.categories)
-                logger.info("Gemini extracted %d items in %d categories from %s", total, len(result.categories), source_label)
-
-                if log_path is not None:
-                    _save_log(log_path, source_label, response_text)
-
-                return result.categories
-
-            except APIError as exc:
-                if _is_daily_quota(exc):
-                    logger.error("Daily quota exhausted for %s, skipping retries", source_label)
-                    if log_path is not None:
-                        _save_log(log_path, source_label, f"ERROR: daily quota exhausted — {exc}")
-                    return []
-                delay: float = _parse_retry_delay(exc) or self.RETRY_FALLBACK_DELAY
-                logger.warning(
-                    "Gemini API error (attempt %d/%d) for %s: %s. Retrying in %.0fs",
-                    attempt + 1, self.MAX_RETRIES, source_label, exc, delay,
+                # Используем встроенный парсер SDK для Pydantic
+                response = await self._client.beta.chat.completions.parse(
+                    model=self._model,
+                    messages=[{"role": "user", "content": content}],
+                    response_format=MenuCategoryList,
+                    max_tokens=4096, # Защита от обрезания длинных списков
                 )
+                
+                parsed_result = response.choices[0].message.parsed
+                return parsed_result.categories if parsed_result else []
+
+            except RateLimitError as exc:
                 if attempt < self.MAX_RETRIES - 1:
-                    await asyncio.sleep(delay)
+                    await asyncio.sleep(self.RETRY_FALLBACK_DELAY)
                 else:
-                    logger.error("Gemini extraction failed after %d retries for %s",
-                                 self.MAX_RETRIES, source_label)
-                    if log_path is not None:
-                        _save_log(log_path, source_label, f"ERROR: {exc}")
+                    logger.error("Rate limit failed for page %d", page_num)
                     return []
-
-            except Exception:
-                logger.exception("Gemini extraction failed for %s", source_label)
-                if log_path is not None:
-                    _save_log(log_path, source_label, "ERROR: see application logs")
-                return []
-
+                    
+            except ValidationError as exc:
+                # Теперь ошибки Pydantic ловятся, и цикл может сделать ретрай
+                if attempt < self.MAX_RETRIES - 1:
+                    await asyncio.sleep(2)
+                else:
+                    logger.error("Validation failed for page %d: %s", page_num, exc)
+                    return []
+                    
+            except Exception as exc:
+                if attempt < self.MAX_RETRIES - 1:
+                    await asyncio.sleep(2)
+                else:
+                    logger.exception("Extraction failed for page %d", page_num)
+                    return []
+                    
         return []
-
-
-def _is_daily_quota(exc: APIError) -> bool:
-    """Check if the error is a daily quota limit (not worth retrying)."""
-    try:
-        error_details = exc.details.get("error", {}).get("details", [])  # type: ignore[union-attr]
-        for detail in error_details:
-            if str(detail.get("@type", "")).endswith("QuotaFailure"):
-                for violation in detail.get("violations", []):
-                    if "PerDay" in str(violation.get("quotaId", "")):
-                        return True
-    except Exception:
-        pass
-    return False
-
-
-def _parse_retry_delay(exc: APIError) -> float | None:
-    """Extract retryDelay seconds from Gemini API error details."""
-    try:
-        error_details = exc.details.get("error", {}).get("details", [])  # type: ignore[union-attr]
-        for detail in error_details:
-            if str(detail.get("@type", "")).endswith("RetryInfo"):
-                raw = str(detail.get("retryDelay", ""))
-                match = re.match(r"(\d+)", raw)
-                if match:
-                    return float(match.group(1)) + 5.0
-    except Exception:
-        pass
-    return None
+    
+def _save_images(log_path: Path, images: list[str]) -> None:
+    """Save base64-encoded PNG images next to the log file as page_1.png, page_2.png, ..."""
+    stem: str = log_path.stem  # e.g. "doc_abc123.llm"
+    for i, img_b64 in enumerate(images, start=1):
+        out_path: Path = log_path.parent / f"{stem}_page_{i}.png"
+        out_path.write_bytes(base64.b64decode(img_b64))
 
 
 def _save_log(log_path: Path, request_text: str, response_text: str) -> None:

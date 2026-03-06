@@ -22,6 +22,9 @@ Router buildRouter({
     final requestJson = jsonDecode(body) as Map<String, dynamic>;
     final url = requestJson['url'] as String;
     final language = requestJson['language'] as String?;
+    final forceRefresh = requestJson['force_refresh'] as bool? ?? false;
+
+    if (forceRefresh) menuCache.clearUrl(url);
 
     // Always scrape/cache in original language
     var categories = menuCache.readOriginal(url);

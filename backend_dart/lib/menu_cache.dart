@@ -48,6 +48,14 @@ class MenuCache {
     print('Menu cached: ${file.path}');
   }
 
+  void clearUrl(String url) {
+    final dir = _dirFor(url);
+    if (dir.existsSync()) {
+      dir.deleteSync(recursive: true);
+      print('Menu cache cleared: ${dir.path}');
+    }
+  }
+
   List<MenuCategory>? readOriginal(String url) =>
       _readFile(_fileFor(url, 'original'));
 

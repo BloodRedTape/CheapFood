@@ -145,7 +145,7 @@ async def scrape_menu(
 
     settings = get_settings()
     html_extractor = HtmlMenuExtractor(api_key=settings.openai_api_key)
-    pdf_extractor = PdfMenuExtractor(api_key=settings.gemini_api_key)
+    pdf_extractor = PdfMenuExtractor(api_key=settings.openai_api_key)
 
     visited: set[str] = {url}
     current_urls: list[str] = [url]

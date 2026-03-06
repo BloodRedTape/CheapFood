@@ -9,32 +9,21 @@ from openai import AsyncOpenAI, RateLimitError, APIError
 from pydantic import BaseModel, Field
 
 from menu_scraper.models.menu import MenuCategory
+from menu_scraper.processing.prompts import MENU_ITEM_FIELDS, MENU_ITEM_RULES
 
 logger: logging.Logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT: str = """You are a menu parser. You receive cleaned text from a restaurant website page.
+SYSTEM_PROMPT: str = f"""You are a menu parser. You receive cleaned text from a restaurant website page.
 Extract ALL menu items grouped by category. For each category return:
 - name: category name as written (e.g. "Starters", "Main Course"), or null if no category is apparent
 - items: list of dishes in that category
 
-For each item return:
-- name: dish name exactly as written
-- description: dish description if present, null otherwise
-- price: numeric price if present, null otherwise
-- currency: ISO currency code (USD, EUR, ILS, GBP, etc.), default USD
-- unit: unit of measurement if present (e.g. "L", "ml", "g", "kg", "pcs"), null otherwise
-- unit_size: numeric size/quantity for the unit (e.g. 0.5, 330, 100), null otherwise
+{MENU_ITEM_FIELDS}
 
 Rules:
 - Group items by the section headers/titles found in the text
 - If all items belong to no clear category, return a single category with name null
-- Extract every item that looks like a menu dish, even if it has no price
-- Keep original dish names and category names, do not translate
-- If price has comma as decimal separator, convert to dot (e.g. 12,50 -> 12.50)
-- If price is missing or not listed, set price to null
-- unit and unit_size go together: if one is absent, both should be null
-- If no items found, return empty list
-- Do NOT invent items or categories that are not in the text"""
+{MENU_ITEM_RULES}"""
 
 
 class MenuCategoryList(BaseModel):

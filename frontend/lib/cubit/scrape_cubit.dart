@@ -55,13 +55,13 @@ class ScrapeCubit extends Cubit<ScrapeState> {
 
   ScrapeCubit() : super(ScrapeInitial());
 
-  Future<void> scrape(String url, {String? language}) async {
+  Future<void> scrape(String url, {String? language, bool forceRefresh = false}) async {
     if (url.trim().isEmpty) return;
 
     emit(ScrapeLoading());
 
     try {
-      final request = ScrapeRequest(url: url.trim(), language: language);
+      final request = ScrapeRequest(url: url.trim(), language: language, forceRefresh: forceRefresh);
       final response = await http.post(
         Uri.parse('$_backendUrl/scrape'),
         headers: {'Content-Type': 'application/json'},
