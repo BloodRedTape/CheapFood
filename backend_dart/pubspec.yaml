@@ -15,6 +15,7 @@ dependencies:
     path: ../common_dart
   shelf_rate_limiter: ^1.0.1
   shelf_static: ^1.1.3
+  path: ^1.9.0
 
 dev_dependencies:
   lints: ^5.0.0

@@ -17,8 +17,8 @@ class _RestaurantsScreenState extends State<RestaurantsScreen> {
   final _urlController = TextEditingController();
   final _cubits = <String, ScrapeCubit>{};
 
-  ScrapeCubit _cubitFor(String url) {
-    return _cubits.putIfAbsent(url, () => ScrapeCubit()..scrape(url));
+  ScrapeCubit _cubitFor(String url, String token) {
+    return _cubits.putIfAbsent(url, () => ScrapeCubit(token: token)..scrape(url));
   }
 
   @override
@@ -42,8 +42,8 @@ class _RestaurantsScreenState extends State<RestaurantsScreen> {
     context.read<AuthCubit>().removeUrl(url);
   }
 
-  void _openScrape(BuildContext context, String url) {
-    final cubit = _cubitFor(url);
+  void _openScrape(BuildContext context, String url, String token) {
+    final cubit = _cubitFor(url, token);
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => BlocProvider.value(
@@ -104,7 +104,7 @@ class _RestaurantsScreenState extends State<RestaurantsScreen> {
                             return ListTile(
                               contentPadding: EdgeInsets.zero,
                               title: Text(url, style: ShadTheme.of(context).textTheme.p),
-                              onTap: () => _openScrape(context, url),
+                              onTap: () => _openScrape(context, url, state.token),
                               trailing: ShadButton.ghost(
                                 onPressed: () => _removeUrl(context, url),
                                 child: const Icon(Icons.delete_outline, size: 18),

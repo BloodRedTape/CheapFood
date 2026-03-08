@@ -52,8 +52,9 @@ final class ScrapeFailure extends ScrapeState {
 
 class ScrapeCubit extends Cubit<ScrapeState> {
   String selectedCurrency = '';
+  final String token;
 
-  ScrapeCubit() : super(ScrapeInitial());
+  ScrapeCubit({required this.token}) : super(ScrapeInitial());
 
   Future<void> scrape(String url, {String? language, bool forceRefresh = false}) async {
     if (url.trim().isEmpty) return;
@@ -66,6 +67,7 @@ class ScrapeCubit extends Cubit<ScrapeState> {
       // Phase 1: stream progress events from scraper
       final streamRequest = http.Request('POST', Uri.parse('$backendUrl/scrape/stream'))
         ..headers['Content-Type'] = 'application/json'
+        ..headers['Authorization'] = 'Bearer $token'
         ..body = requestBody;
 
       final streamedResponse = await FetchClient(mode: RequestMode.cors).send(streamRequest);

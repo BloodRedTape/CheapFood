@@ -38,7 +38,19 @@ Router buildRouter({
     maxRequests: 10,
   );
 
+  // NOTE: All routes in this router require a valid JWT Bearer token.
+  // Any new route added here MUST start with _extractLogin() check before processing.
+
   router.post('/scrape/stream', (Request request) async {
+    final login = _extractLogin(request, userService);
+    if (login == null) {
+      return Response(
+        401,
+        body: 'event: error\ndata: Unauthorized\n\n',
+        headers: {'Content-Type': 'text/event-stream'},
+      );
+    }
+
     final body = await request.readAsString();
     final requestJson = jsonDecode(body) as Map<String, dynamic>;
     final url = requestJson['url'] as String;

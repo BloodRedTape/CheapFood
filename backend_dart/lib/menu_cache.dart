@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:common_dart/common_dart.dart';
+import 'package:path/path.dart' as p;
 
 import 'config.dart';
 
@@ -15,22 +16,32 @@ class MenuCache {
     _baseDir.createSync(recursive: true);
   }
 
-  /// Returns a subdirectory for the given URL, e.g. cache/www_example_com/menu/
+  /// Returns a subdirectory for the given URL, e.g. cache/www_example_com/
+  /// All non-word characters (including slashes) are replaced with underscores
+  /// to produce a flat, single-level name — no path separators, no traversal.
   Directory _dirFor(String url) {
-    final path = url
+    final name = url
         .replaceAll(RegExp(r'https?://'), '')
-        .replaceAll(RegExp(r'[^\w/]'), '_')
+        .replaceAll(RegExp(r'[^\w]'), '_')
         .replaceAll(RegExp(r'_+'), '_')
-        .replaceAll(RegExp(r'/+'), '/')
-        .toLowerCase()
-        .replaceAll('/', Platform.pathSeparator);
-    return Directory('${_baseDir.path}${Platform.pathSeparator}$path');
+        .toLowerCase();
+    final dirPath = p.join(_baseDir.path, name);
+    if (!p.isWithin(_baseDir.path, dirPath)) {
+      throw ArgumentError('Path traversal detected for url: $url');
+    }
+    return Directory(dirPath);
   }
 
   File _fileFor(String url, String name) {
+    // Sanitize name (language code or 'original'): only word chars and hyphens.
+    final safeName = name.replaceAll(RegExp(r'[^\w\-]'), '_');
     final dir = _dirFor(url);
     dir.createSync(recursive: true);
-    return File('${dir.path}${Platform.pathSeparator}$name.json');
+    final filePath = p.join(dir.path, '$safeName.json');
+    if (!p.isWithin(_baseDir.path, filePath)) {
+      throw ArgumentError('Path traversal detected for name: $name');
+    }
+    return File(filePath);
   }
 
   List<MenuCategory>? _readFile(File file) {
