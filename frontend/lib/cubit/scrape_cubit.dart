@@ -1,4 +1,4 @@
-import 'dart:convert';
+import 'dart:convert' show jsonEncode;
 
 import 'package:common_dart/common_dart.dart';
 import 'package:fetch_client/fetch_client.dart';
@@ -77,43 +77,23 @@ class ScrapeCubit extends Cubit<ScrapeState> {
         return;
       }
 
-      final stream = streamedResponse.stream;
-
-      String buffer = '';
-      String? eventType;
-      String? eventData;
-
-      await for (final chunk in stream) {
-        buffer += utf8.decode(chunk);
-        final lines = buffer.split('\n');
-        buffer = lines.last;
-
-        for (final line in lines.sublist(0, lines.length - 1)) {
-          if (line.startsWith('event: ')) {
-            eventType = line.substring(7).trim();
-          } else if (line.startsWith('data: ')) {
-            eventData = line.substring(6).trim();
-          } else if (line.isEmpty && eventType != null && eventData != null) {
-            if (eventType == 'progress') {
-              emit(ScrapeStreaming(eventData));
-            } else if (eventType == 'error') {
-              emit(ScrapeFailure(eventData));
-              return;
-            } else if (eventType == 'result') {
-              final scrapeResponse = ScrapeResponse.fromJson(jsonDecode(eventData) as Map<String, dynamic>);
-              emit(
-                ScrapeSuccess(
-                  categories: scrapeResponse.categories,
-                  exchangeRates: scrapeResponse.exchangeRates,
-                  selectedCurrency: selectedCurrency,
-                  language: language ?? '',
-                ),
-              );
-              return;
-            }
-            eventType = null;
-            eventData = null;
-          }
+      await for (final event in ScraperEvent.parseStream(streamedResponse.stream)) {
+        switch (event) {
+          case ScraperProgressEvent(:final message):
+            emit(ScrapeStreaming(message));
+          case ScraperErrorEvent(:final message):
+            emit(ScrapeFailure(message));
+            return;
+          case ScraperSaturatedResultEvent(:final response):
+            emit(ScrapeSuccess(
+              categories: response.categories,
+              exchangeRates: response.exchangeRates,
+              selectedCurrency: selectedCurrency,
+              language: language ?? '',
+            ));
+            return;
+          case ScraperResultEvent():
+            break; // never sent by backend to frontend
         }
       }
     } catch (e) {

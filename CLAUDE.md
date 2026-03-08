@@ -58,4 +58,23 @@
 - Flutter Web: `package:http` uses XHR which buffers SSE — use `FetchClient(mode: RequestMode.cors)` from `fetch_client` package instead
 - Do NOT add `Transfer-Encoding: chunked` manually — causes double-encoding error in `http_parser`
 
+## SSE Event Types (ScraperEvent in common_dart)
+- All SSE events are typed via `sealed class ScraperEvent` in `common_dart/lib/src/models/scraper_event.dart`
+- `toSse() → List<int>` on each subclass handles UTF-8 encoding — no manual `utf8.encode` elsewhere
+- `ScraperEvent.parseStream(Stream<List<int>>)` handles buffering, line splitting, field parsing — shared by backend and frontend
+- Four event types:
+  - `ScraperProgressEvent(message)` — progress text, used in both directions
+  - `ScraperErrorEvent(message)` — error, used in both directions
+  - `ScraperResultEvent(categories)` — raw result from Python scraper (`event: result`, List<MenuCategory>)
+  - `ScraperSaturatedResultEvent(response)` — enriched result from backend to frontend (`event: saturated_result`, ScrapeResponse with exchange rates)
+- Backend reads `ScraperResultEvent` from scraper, enriches it, sends `ScraperSaturatedResultEvent` to frontend
+- Frontend only handles `ScraperProgressEvent`, `ScraperErrorEvent`, `ScraperSaturatedResultEvent`
+
+## Scrape Deduplication
+- `ScrapeDeduplicator` in `backend_dart` deduplicates in-flight scrape requests by URL
+- Uses `StreamController.broadcast()` — all concurrent requests for same URL share one SSE stream
+- Primary request writes to both broadcast and its own output controller directly (not via listener) to avoid premature close
+- Secondary requests subscribe to broadcast and pipe chunks to their own output controller
+- On `ScraperResultEvent`: broadcast closes, deduplication entry removed, primary request continues post-processing independently
+
 NEVER READ .env FILES!!!
