@@ -11,6 +11,7 @@ import 'package:shelf_router/shelf_router.dart';
 import 'config.dart';
 import 'exchange_rate_cache.dart';
 import 'menu_cache.dart';
+import 'rate_limiter.dart';
 import 'translation_service.dart';
 import 'user_service.dart';
 
@@ -38,6 +39,9 @@ Router buildRouter({
     maxRequests: 10,
   );
 
+  // 5 scrape requests per minute per user
+  final scrapeRateLimiter = RateLimiter(maxRequests: 5, window: const Duration(minutes: 1));
+
   // NOTE: All routes in this router require a valid JWT Bearer token.
   // Any new route added here MUST start with _extractLogin() check before processing.
 
@@ -47,6 +51,14 @@ Router buildRouter({
       return Response(
         401,
         body: 'event: error\ndata: Unauthorized\n\n',
+        headers: {'Content-Type': 'text/event-stream'},
+      );
+    }
+
+    if (!scrapeRateLimiter.allow(login)) {
+      return Response(
+        429,
+        body: 'event: error\ndata: Too many requests\n\n',
         headers: {'Content-Type': 'text/event-stream'},
       );
     }
@@ -73,7 +85,8 @@ Router buildRouter({
             categories = await translationService.translate(language: language, categories: categories);
             menuCache.writeTranslated(url, language, categories);
           } catch (e) {
-            controller.add(utf8.encode('event: error\ndata: Translation failed: $e\n\n'));
+            print('Translation error: $e');
+            controller.add(utf8.encode('event: error\ndata: Translation failed\n\n'));
             await controller.close();
             return;
           }
@@ -95,7 +108,8 @@ Router buildRouter({
         final payload = jsonEncode(ScrapeResponse(categories: categories, exchangeRates: exchangeRates).toJson());
         controller.add(utf8.encode('event: result\ndata: $payload\n\n'));
       } catch (e) {
-        controller.add(utf8.encode('event: error\ndata: Exchange rates failed: $e\n\n'));
+        print('Exchange rates error: $e');
+        controller.add(utf8.encode('event: error\ndata: Exchange rates failed\n\n'));
       }
       await controller.close();
     }
@@ -165,8 +179,9 @@ Router buildRouter({
     }
 
     forward().catchError((Object e) {
+      print('Scrape forward error: $e');
       if (!controller.isClosed) {
-        controller.add(utf8.encode('event: error\ndata: $e\n\n'));
+        controller.add(utf8.encode('event: error\ndata: Scrape failed\n\n'));
         controller.close();
       }
     });
