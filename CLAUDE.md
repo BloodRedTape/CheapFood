@@ -70,6 +70,20 @@
 - Backend reads `ScraperResultEvent` from scraper, enriches it, sends `ScraperSaturatedResultEvent` to frontend
 - Frontend only handles `ScraperProgressEvent`, `ScraperErrorEvent`, `ScraperSaturatedResultEvent`
 
+## Scraping Pipeline (`menu_scraper/scraper/scraper.py`)
+1. **PDF link** (`looks_like_pdf`) → `PdfOnlyParser` — скачивает PDF, LLM-извлечение, enhance, возвращает `(categories, RestaurantInfo())`
+2. **Crawl** → `MenuCrawler` собирает HTML-страницы и ссылки на PDF
+3. **Detect** → `SiteType` определяется по HTML главной страницы
+4. **Parse** по типу сайта:
+   - `CHOICEQR` → `ChoiceQrParser` — парсит `__NEXT_DATA__` JSON, возвращает `(categories, RestaurantInfo)` без LLM
+   - `GENERIC` → `GenericParser` — LLM-извлечение из HTML + PDF, enhance, `RestaurantInfoExtractor`, возвращает `(categories, RestaurantInfo)`
+
+### Парсеры (`menu_scraper/parsers/`)
+- Каждый парсер сам создаёт нужные экстракторы через `api_key` — `scraper.py` их не инстанцирует
+- `PdfOnlyParser`: `PdfMenuExtractor` + `MenuEnhancer`
+- `GenericParser`: `HtmlMenuExtractor` + `PdfMenuExtractor` + `MenuEnhancer` + `RestaurantInfoExtractor`
+- `ChoiceQrParser`: синхронный, без LLM, `RestaurantInfo` извлекается из `__NEXT_DATA__`
+
 ## Scrape Deduplication
 - `ScrapeDeduplicator` in `backend_dart` deduplicates in-flight scrape requests by URL
 - Uses `StreamController.broadcast()` — all concurrent requests for same URL share one SSE stream

@@ -226,19 +226,35 @@ class _RestaurantInfoTab extends StatelessWidget {
 
   const _RestaurantInfoTab({required this.info});
 
+  static const _dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
+    final isEmpty = info.name == null &&
+        info.phones.isEmpty &&
+        info.address == null &&
+        info.workingHours.isEmpty &&
+        info.siteLanguage == null;
     return ListView(
       padding: const EdgeInsets.only(top: 16),
       children: [
         if (info.name != null)
           _InfoRow(label: 'Name', value: info.name!),
-        if (info.workingHours != null)
-          _InfoRow(label: 'Working hours', value: info.workingHours!),
+        if (info.address != null)
+          _InfoRow(label: 'Address', value: info.address!),
+        if (info.phones.isNotEmpty)
+          _InfoRow(label: 'Phone', value: info.phones.join(', ')),
+        if (info.workingHours.isNotEmpty)
+          _InfoRow(
+            label: 'Working hours',
+            value: info.workingHours
+                .map((d) => '${_dayNames[d.day]}: ${d.open ?? '?'}–${d.close ?? '?'}')
+                .join('\n'),
+          ),
         if (info.siteLanguage != null)
           _InfoRow(label: 'Site language', value: info.siteLanguage!),
-        if (info.name == null && info.workingHours == null && info.siteLanguage == null)
+        if (isEmpty)
           Center(child: Text('No restaurant info available', style: theme.textTheme.muted)),
       ],
     );

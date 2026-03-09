@@ -7,7 +7,7 @@ import re
 from decimal import Decimal
 from pathlib import Path
 
-from menu_scraper.models.menu import MenuItem, MenuCategory, MenuItemVariation, RestaurantInfo
+from menu_scraper.models.menu import DaySchedule, MenuItem, MenuCategory, MenuItemVariation, RestaurantInfo
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -15,8 +15,6 @@ _NEXT_DATA_RE = re.compile(
     r'<script[^>]+id=["\']__NEXT_DATA__["\'][^>]*>(.*?)</script>',
     re.DOTALL,
 )
-
-_DAY_NAMES: list[str] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
 
 
 def _extract_next_data(html: str) -> dict | None:
@@ -40,32 +38,18 @@ def _format_time(t: str) -> str:
     return t[:5]
 
 
-def _format_work_time(work_time_all: list[dict]) -> str | None:
-    """Convert workTimeAll array to human-readable string like 'Mon–Fri 11:00–22:00, Sat 11:00–23:00, Sun 12:00–21:00'."""
-    active = [d for d in work_time_all if d.get("active", False)]
-    if not active:
-        return None
-
-    # Group consecutive days with same hours
-    day_groups: list[tuple[list[int], str]] = []
-    for day in sorted(active, key=lambda d: d["dayOfWeek"]):
-        day_idx: int = day["dayOfWeek"]
-        from_t: str = _format_time(day.get("from", ""))
-        till_t: str = _format_time(day.get("till", ""))
-        hours: str = f"{from_t}–{till_t}"
-        if day_groups and day_groups[-1][1] == hours and day_groups[-1][0][-1] == day_idx - 1:
-            day_groups[-1][0].append(day_idx)
-        else:
-            day_groups.append(([day_idx], hours))
-
-    parts: list[str] = []
-    for days, hours in day_groups:
-        if len(days) == 1:
-            parts.append(f"{_DAY_NAMES[days[0]]} {hours}")
-        else:
-            parts.append(f"{_DAY_NAMES[days[0]]}–{_DAY_NAMES[days[-1]]} {hours}")
-
-    return ", ".join(parts) if parts else None
+def _parse_work_time(work_time_all: list[dict]) -> list[DaySchedule]:
+    """Convert workTimeAll array to list of DaySchedule (active days only)."""
+    result: list[DaySchedule] = []
+    for day in sorted(work_time_all, key=lambda d: d.get("dayOfWeek", 0)):
+        if not day.get("active", False):
+            continue
+        result.append(DaySchedule(
+            day=day["dayOfWeek"],
+            open=_format_time(day["from"]) if day.get("from") else None,
+            close=_format_time(day["till"]) if day.get("till") else None,
+        ))
+    return result
 
 
 class ChoiceQrParser:
@@ -76,18 +60,20 @@ class ChoiceQrParser:
             pages: list of (html_content, filename) tuples from CrawlResult.pending_texts
             log_dir: directory for debug output
         """
+        best_info: RestaurantInfo = RestaurantInfo()
         for html, filename in pages:
             data = _extract_next_data(html)
             if data is not None:
                 logger.info("choiceQR: found __NEXT_DATA__ in %s", filename)
                 categories, info = self._parse_data(data)
+                best_info = best_info.merge(info)
                 if categories:
                     self._dump_debug(data, log_dir)
-                    return categories, info
+                    return categories, best_info
                 logger.warning("choiceQR: __NEXT_DATA__ found but no menu items in %s", filename)
 
         logger.warning("choiceQR: no usable __NEXT_DATA__ found in any page")
-        return [], RestaurantInfo()
+        return [], best_info
 
     def _parse_data(self, data: dict) -> tuple[list[MenuCategory], RestaurantInfo]:
         app: dict = data.get("props", {}).get("app", {})
@@ -95,9 +81,17 @@ class ChoiceQrParser:
         currency: str = place.get("currency", "")
 
         # Restaurant info
+        contact: dict = place.get("contactInfo", {})
+        raw_phone: str | None = contact.get("phone") or None
+        phones: list[str] = [raw_phone] if raw_phone else []
+        if contact.get("additionalPhones"):
+            phones.extend(contact["additionalPhones"])
+        address: str | None = (contact.get("address") or {}).get("prediction") or None
         info = RestaurantInfo(
             name=place.get("name") or None,
-            working_hours=_format_work_time(place.get("workTimeAll", [])),
+            phones=phones,
+            address=address,
+            working_hours=_parse_work_time(place.get("workTimeAll", [])),
             site_language=app.get("language", {}).get("current") or None,
         )
 

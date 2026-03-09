@@ -99,9 +99,17 @@ class MenuCategory(BaseModel):
         return _capitalize_first(v)
 
 
+class DaySchedule(BaseModel):
+    day: int  # 0=Sun, 1=Mon, ..., 6=Sat
+    open: str | None = None   # "HH:MM"
+    close: str | None = None  # "HH:MM"
+
+
 class RestaurantInfo(BaseModel):
     name: str | None = None
-    working_hours: str | None = None
+    phones: list[str] = Field(default_factory=list)
+    address: str | None = None
+    working_hours: list[DaySchedule] = Field(default_factory=list)
     site_language: str | None = None
 
     def is_complete(self) -> bool:
@@ -111,6 +119,8 @@ class RestaurantInfo(BaseModel):
         """Fill missing fields from other."""
         return RestaurantInfo(
             name=self.name or other.name,
+            phones=self.phones or other.phones,
+            address=self.address or other.address,
             working_hours=self.working_hours or other.working_hours,
             site_language=self.site_language or other.site_language,
         )
