@@ -6,12 +6,11 @@ import logging
 
 from fastapi import FastAPI, Request
 from pydantic import BaseModel
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
 from menu_scraper.models.menu import MenuCategory, RestaurantInfo
 from menu_scraper.models.requests import ScrapeRequest
-from menu_scraper.scraper import scrape_menu
+from menu_scraper.scraper.scraper import scrape_menu
 
 logging.basicConfig(level=logging.INFO)
 

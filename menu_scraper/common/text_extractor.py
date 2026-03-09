@@ -9,7 +9,7 @@ from openai import AsyncOpenAI, RateLimitError, APIError
 from pydantic import BaseModel, Field, ValidationError
 
 from menu_scraper.models.menu import MenuCategory
-from menu_scraper.processing.prompts import MENU_ITEM_FIELDS, MENU_ITEM_RULES
+from menu_scraper.common.prompts import MENU_ITEM_FIELDS, MENU_ITEM_RULES
 
 logger: logging.Logger = logging.getLogger(__name__)
 

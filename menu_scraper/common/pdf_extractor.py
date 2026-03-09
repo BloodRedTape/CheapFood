@@ -10,7 +10,7 @@ import pymupdf  # type: ignore[import-untyped]
 import pymupdf4llm  # type: ignore[import-untyped]
 
 from menu_scraper.models.menu import MenuCategory
-from menu_scraper.processing.text_extractor import TextMenuExtractor
+from menu_scraper.common.text_extractor import TextMenuExtractor
 
 logger: logging.Logger = logging.getLogger(__name__)
 

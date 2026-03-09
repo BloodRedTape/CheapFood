@@ -9,7 +9,7 @@ from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
 
 from menu_scraper.models.menu import MenuCategory
-from menu_scraper.processing.menu_filter import MenuFilter, ProgressCallback
+from menu_scraper.common.menu_filter import MenuFilter, ProgressCallback
 
 logger: logging.Logger = logging.getLogger(__name__)
 

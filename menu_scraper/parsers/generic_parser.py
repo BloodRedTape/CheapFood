@@ -9,10 +9,11 @@ from pathlib import Path
 import httpx
 
 from menu_scraper.models.menu import MediaFile, MenuCategory, MenuSourceType
-from menu_scraper.processing.crawler import CrawlResult, download_pdf
-from menu_scraper.processing.html_extractor import HtmlMenuExtractor
-from menu_scraper.processing.menu_enhancer import MenuEnhancer
-from menu_scraper.processing.pdf_extractor import PdfMenuExtractor
+from menu_scraper.scraper.crawler import CrawlResult
+from menu_scraper.utils.media_handler import  download_pdf
+from menu_scraper.common.html_extractor import HtmlMenuExtractor
+from menu_scraper.common.menu_enhancer import MenuEnhancer
+from menu_scraper.common.pdf_extractor import PdfMenuExtractor
 
 logger: logging.Logger = logging.getLogger(__name__)
 

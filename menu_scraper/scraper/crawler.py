@@ -13,6 +13,7 @@ import httpx
 from parsel import Selector
 
 from menu_scraper.models.menu import MediaFile, MenuSourceType
+from menu_scraper.utils.media_handler import looks_like_pdf
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -154,7 +155,7 @@ def _extract_pdf_links(sel: Selector, base_url: str) -> list[MediaFile]:
         if not href:
             continue
         full_url = urljoin(base_url, href)
-        if not (_looks_like_pdf(href) or _looks_like_pdf(full_url)):
+        if not (looks_like_pdf(href) or looks_like_pdf(full_url)):
             continue
         if full_url in seen_urls:
             continue
@@ -188,38 +189,3 @@ def _extract_menu_images(sel: Selector, base_url: str) -> list[MediaFile]:
     return results
 
 
-async def download_pdf(
-    client: httpx.AsyncClient,
-    url: str,
-    pdf_dir: Path,
-) -> tuple[bytes, Path] | None:
-    """Download a PDF file and save to disk. Returns (pdf_bytes, local_path) or None."""
-    try:
-        response: httpx.Response = await client.get(url)
-        response.raise_for_status()
-    except httpx.HTTPError as exc:
-        logger.warning("Failed to download PDF %s: %s", url, exc)
-        return None
-
-    pdf_data: bytes = response.content
-    if len(pdf_data) < 100:
-        logger.warning("PDF too small, likely not a real PDF: %s (%d bytes)", url, len(pdf_data))
-        return None
-
-    url_hash: str = hashlib.md5(url.encode()).hexdigest()[:10]
-    parsed = urlparse(url)
-    stem: str = parsed.path.strip("/").replace("/", "_").removesuffix(".pdf") or "doc"
-    safe_stem: str = re.sub(r"[^a-zA-Z0-9_]", "", stem)[:60]
-    filename: str = f"{safe_stem}_{url_hash}.pdf"
-    local_path: Path = pdf_dir / filename
-    local_path.write_bytes(pdf_data)
-    logger.info("Saved PDF: %s -> %s (%d bytes)", url, filename, len(pdf_data))
-
-    return pdf_data, local_path
-
-
-def _looks_like_pdf(url: str) -> bool:
-    parsed = urlparse(url)
-    if parsed.path.lower().endswith(".pdf"):
-        return True
-    return ".pdf" in parsed.query.lower()

@@ -8,7 +8,7 @@ from openai import AsyncOpenAI, APIError, RateLimitError
 from pydantic import BaseModel
 
 from menu_scraper.models.menu import RestaurantInfo
-from menu_scraper.processing.html_extractor import clean_html
+from menu_scraper.common.html_extractor import clean_html
 
 logger: logging.Logger = logging.getLogger(__name__)
 

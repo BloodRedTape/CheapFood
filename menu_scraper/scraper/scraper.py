@@ -16,14 +16,15 @@ from menu_scraper.models.menu import (
     MenuCategory,
     RestaurantInfo,
 )
-from menu_scraper.processing.choiceqr_parser import ChoiceQrParser
-from menu_scraper.processing.crawler import MenuCrawler, _looks_like_pdf, download_pdf
-from menu_scraper.processing.generic_parser import GenericParser
-from menu_scraper.processing.html_extractor import HtmlMenuExtractor
-from menu_scraper.processing.menu_enhancer import MenuEnhancer
-from menu_scraper.processing.pdf_extractor import PdfMenuExtractor
-from menu_scraper.processing.restaurant_info_extractor import RestaurantInfoExtractor
-from menu_scraper.processing.site_detector import SiteType, detect_site_type
+from menu_scraper.parsers.choiceqr_parser import ChoiceQrParser
+from menu_scraper.scraper.crawler import MenuCrawler
+from menu_scraper.utils.media_handler import looks_like_pdf, download_pdf
+from menu_scraper.parsers.generic_parser import GenericParser
+from menu_scraper.common.html_extractor import HtmlMenuExtractor
+from menu_scraper.common.menu_enhancer import MenuEnhancer
+from menu_scraper.common.pdf_extractor import PdfMenuExtractor
+from menu_scraper.common.restaurant_info_extractor import RestaurantInfoExtractor
+from menu_scraper.scraper.site_detector import SiteType, detect_site_type
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -75,7 +76,7 @@ async def scrape_menu(
     restaurant_info_extractor = RestaurantInfoExtractor(api_key=settings.openai_api_key)
 
     # Direct PDF link — skip crawl entirely
-    if _looks_like_pdf(url):
+    if looks_like_pdf(url):
         logger.info("URL is a direct PDF link, skipping crawl: %s", url)
         await _progress("Downloading PDF...")
         async with httpx.AsyncClient(
