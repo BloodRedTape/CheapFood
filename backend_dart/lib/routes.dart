@@ -17,8 +17,8 @@ Router buildRouter({
 }) {
   final router = Router();
 
-  router.mount('/auth', buildAuthRouter(userService: userService).call);
-  router.mount('/restaurants', buildRestaurantRouter(userService: userService).call);
+  router.mount('/auth', buildAuthRouter(userService: userService, menuCache: menuCache).call);
+  router.mount('/restaurants', buildRestaurantRouter(userService: userService, menuCache: menuCache).call);
   router.mount('/scrape', buildScrapeRouter(
     menuCache: menuCache,
     rateCache: rateCache,

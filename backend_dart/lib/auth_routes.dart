@@ -5,9 +5,11 @@ import 'package:shelf_rate_limiter/shelf_rate_limiter.dart';
 import 'package:shelf_router/shelf_router.dart';
 
 import 'config.dart';
+import 'menu_cache.dart';
+import 'restaurant_routes.dart';
 import 'user_service.dart';
 
-Router buildAuthRouter({required UserService userService}) {
+Router buildAuthRouter({required UserService userService, required MenuCache menuCache}) {
   final router = Router();
 
   final rateLimiter = ShelfRateLimiter(
@@ -34,7 +36,8 @@ Router buildAuthRouter({required UserService userService}) {
       return Response(409, body: jsonEncode({'error': 'login already taken'}), headers: {'Content-Type': 'application/json'});
     }
     final token = userService.issueToken(user.login);
-    return Response.ok(jsonEncode({'token': token, 'login': user.login, 'urls': user.urls}), headers: {'Content-Type': 'application/json'});
+    final previews = buildRestaurantPreviews(user.urls, menuCache);
+    return Response.ok(jsonEncode({'token': token, 'login': user.login, 'restaurants': previews.map((p) => p.toJson()).toList()}), headers: {'Content-Type': 'application/json'});
   });
 
   inner.post('/login', (Request request) async {
@@ -53,7 +56,8 @@ Router buildAuthRouter({required UserService userService}) {
       return Response(401, body: jsonEncode({'error': 'invalid credentials'}), headers: {'Content-Type': 'application/json'});
     }
     final token = userService.issueToken(user.login);
-    return Response.ok(jsonEncode({'token': token, 'login': user.login, 'urls': user.urls}), headers: {'Content-Type': 'application/json'});
+    final previews = buildRestaurantPreviews(user.urls, menuCache);
+    return Response.ok(jsonEncode({'token': token, 'login': user.login, 'restaurants': previews.map((p) => p.toJson()).toList()}), headers: {'Content-Type': 'application/json'});
   });
 
   router.mount('/', Pipeline().addMiddleware(rateLimiter.rateLimiter()).addHandler(inner.call));

@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:common_dart/common_dart.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -15,16 +16,25 @@ final class AuthLoading extends AuthState {}
 final class AuthSuccess extends AuthState {
   final String login;
   final String token;
-  final List<String> urls;
+  final List<RestaurantPreviewInfo> restaurants;
 
-  AuthSuccess({required this.login, required this.token, required this.urls});
+  AuthSuccess({required this.login, required this.token, required this.restaurants});
 
-  AuthSuccess withUrls(List<String> urls) => AuthSuccess(login: login, token: token, urls: urls);
+  List<String> get urls => restaurants.map((r) => r.url).toList();
+
+  AuthSuccess withRestaurants(List<RestaurantPreviewInfo> restaurants) =>
+      AuthSuccess(login: login, token: token, restaurants: restaurants);
 }
 
 final class AuthFailure extends AuthState {
   final String message;
   AuthFailure(this.message);
+}
+
+List<RestaurantPreviewInfo> _parseRestaurants(Map<String, dynamic> data) {
+  return (data['restaurants'] as List<dynamic>)
+      .map((e) => RestaurantPreviewInfo.fromJson(e as Map<String, dynamic>))
+      .toList();
 }
 
 class AuthCubit extends Cubit<AuthState> {
@@ -59,7 +69,7 @@ class AuthCubit extends Cubit<AuthState> {
           ) as Map<String, dynamic>;
           final login = payload['login'] as String?;
           if (login != null) {
-            emit(AuthSuccess(login: login, token: token, urls: (data['urls'] as List).cast<String>()));
+            emit(AuthSuccess(login: login, token: token, restaurants: _parseRestaurants(data)));
             return;
           }
         }
@@ -93,7 +103,7 @@ class AuthCubit extends Cubit<AuthState> {
       if (response.statusCode == 200) {
         final token = data['token'] as String;
         await _saveToken(token);
-        emit(AuthSuccess(login: data['login'] as String, token: token, urls: (data['urls'] as List).cast<String>()));
+        emit(AuthSuccess(login: data['login'] as String, token: token, restaurants: _parseRestaurants(data)));
       } else {
         emit(AuthFailure(data['error'] as String? ?? 'Login failed'));
       }
@@ -114,7 +124,7 @@ class AuthCubit extends Cubit<AuthState> {
       if (response.statusCode == 200) {
         final token = data['token'] as String;
         await _saveToken(token);
-        emit(AuthSuccess(login: data['login'] as String, token: token, urls: (data['urls'] as List).cast<String>()));
+        emit(AuthSuccess(login: data['login'] as String, token: token, restaurants: _parseRestaurants(data)));
       } else {
         emit(AuthFailure(data['error'] as String? ?? 'Registration failed'));
       }
@@ -139,7 +149,7 @@ class AuthCubit extends Cubit<AuthState> {
       );
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
-        emit(current.withUrls((data['urls'] as List).cast<String>()));
+        emit(current.withRestaurants(_parseRestaurants(data)));
       }
     } catch (_) {}
   }
@@ -155,7 +165,7 @@ class AuthCubit extends Cubit<AuthState> {
       if (streamed.statusCode == 200) {
         final body = await streamed.stream.bytesToString();
         final data = jsonDecode(body) as Map<String, dynamic>;
-        emit(current.withUrls((data['urls'] as List).cast<String>()));
+        emit(current.withRestaurants(_parseRestaurants(data)));
       }
     } catch (_) {}
   }

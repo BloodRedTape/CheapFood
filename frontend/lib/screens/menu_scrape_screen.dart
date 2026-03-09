@@ -2,6 +2,7 @@ import 'package:common_dart/common_dart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../cubit/scrape_cubit.dart';
 
@@ -144,7 +145,7 @@ class _SuccessView extends StatelessWidget {
           children: [
             Text('$totalItems items found, $itemsWithPrice with price', style: ShadTheme.of(context).textTheme.muted),
             const SizedBox(height: 12),
-            Expanded(child: _CategoryTabView(state: cubitState, categories: categories)),
+            Expanded(child: _CategoryTabView(state: cubitState, categories: categories, restaurantUrl: context.findAncestorStateOfType<_MenuScrapeScreenState>()?.widget.restaurantUrl)),
           ],
         );
       },
@@ -155,8 +156,9 @@ class _SuccessView extends StatelessWidget {
 class _CategoryTabView extends StatefulWidget {
   final ScrapeSuccess state;
   final List<MenuCategory> categories;
+  final String? restaurantUrl;
 
-  const _CategoryTabView({required this.state, required this.categories});
+  const _CategoryTabView({required this.state, required this.categories, this.restaurantUrl});
 
   @override
   State<_CategoryTabView> createState() => _CategoryTabViewState();
@@ -205,7 +207,7 @@ class _CategoryTabViewState extends State<_CategoryTabView> with SingleTickerPro
           child: TabBarView(
             controller: _tabController,
             children: [
-              _RestaurantInfoTab(info: widget.state.restaurantInfo),
+              _RestaurantInfoTab(info: widget.state.restaurantInfo, websiteUrl: widget.restaurantUrl),
               ...widget.categories.map((category) {
                 return ListView.separated(
                   padding: const EdgeInsets.only(top: 12),
@@ -227,8 +229,9 @@ class _CategoryTabViewState extends State<_CategoryTabView> with SingleTickerPro
 
 class _RestaurantInfoTab extends StatelessWidget {
   final RestaurantInfo info;
+  final String? websiteUrl;
 
-  const _RestaurantInfoTab({required this.info});
+  const _RestaurantInfoTab({required this.info, this.websiteUrl});
 
   static const _dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -239,12 +242,15 @@ class _RestaurantInfoTab extends StatelessWidget {
         info.phones.isEmpty &&
         info.address == null &&
         info.workingHours.isEmpty &&
-        info.siteLanguage == null;
+        info.siteLanguage == null &&
+        websiteUrl == null;
     return ListView(
       padding: const EdgeInsets.only(top: 16),
       children: [
         if (info.name != null)
           _InfoRow(label: 'Name', value: info.name!),
+        if (websiteUrl != null)
+          _InfoLinkRow(label: 'Website', url: websiteUrl!),
         if (info.address != null)
           _InfoRow(label: 'Address', value: info.address!),
         if (info.phones.isNotEmpty)
@@ -281,6 +287,39 @@ class _InfoRow extends StatelessWidget {
         children: [
           SizedBox(width: 130, child: Text(label, style: theme.textTheme.muted)),
           Expanded(child: Text(value, style: theme.textTheme.p)),
+        ],
+      ),
+    );
+  }
+}
+
+class _InfoLinkRow extends StatelessWidget {
+  final String label;
+  final String url;
+
+  const _InfoLinkRow({required this.label, required this.url});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = ShadTheme.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(width: 130, child: Text(label, style: theme.textTheme.muted)),
+          Expanded(
+            child: GestureDetector(
+              onTap: () => launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication),
+              child: Text(
+                url,
+                style: theme.textTheme.p.copyWith(
+                  color: theme.colorScheme.primary,
+                  decoration: TextDecoration.underline,
+                ),
+              ),
+            ),
+          ),
         ],
       ),
     );

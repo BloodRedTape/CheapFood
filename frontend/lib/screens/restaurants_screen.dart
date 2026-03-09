@@ -94,20 +94,41 @@ class _RestaurantsScreenState extends State<RestaurantsScreen> {
                 ),
                 const SizedBox(height: 16),
                 Expanded(
-                  child: state.urls.isEmpty
+                  child: state.restaurants.isEmpty
                       ? Center(child: Text('No restaurants yet', style: ShadTheme.of(context).textTheme.muted))
                       : ListView.separated(
-                          itemCount: state.urls.length,
-                          separatorBuilder: (_, __) => const Divider(),
+                          itemCount: state.restaurants.length,
+                          separatorBuilder: (_, __) => const SizedBox(height: 8),
                           itemBuilder: (context, index) {
-                            final url = state.urls[index];
-                            return ListTile(
-                              contentPadding: EdgeInsets.zero,
-                              title: Text(url, style: ShadTheme.of(context).textTheme.p),
-                              onTap: () => _openScrape(context, url, state.token),
-                              trailing: ShadButton.ghost(
-                                onPressed: () => _removeUrl(context, url),
-                                child: const Icon(Icons.delete_outline, size: 18),
+                            final restaurant = state.restaurants[index];
+                            return ShadCard(
+                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                              child: InkWell(
+                                onTap: () => _openScrape(context, restaurant.url, state.token),
+                                borderRadius: BorderRadius.circular(8),
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(restaurant.name ?? restaurant.url, style: ShadTheme.of(context).textTheme.p),
+                                          if (restaurant.name != null)
+                                            Text(restaurant.url, style: ShadTheme.of(context).textTheme.muted),
+                                        ],
+                                      ),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Text(
+                                      '${restaurant.itemsWithPrice}/${restaurant.totalItems}',
+                                      style: ShadTheme.of(context).textTheme.muted,
+                                    ),
+                                    ShadButton.ghost(
+                                      onPressed: () => _removeUrl(context, restaurant.url),
+                                      child: const Icon(Icons.delete_outline, size: 18),
+                                    ),
+                                  ],
+                                ),
                               ),
                             );
                           },

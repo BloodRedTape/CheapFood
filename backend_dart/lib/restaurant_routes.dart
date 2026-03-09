@@ -1,8 +1,10 @@
 import 'dart:convert';
 
+import 'package:common_dart/common_dart.dart';
 import 'package:shelf/shelf.dart';
 import 'package:shelf_router/shelf_router.dart';
 
+import 'menu_cache.dart';
 import 'user_service.dart';
 
 Response _unauthorized([String message = 'Unauthorized']) =>
@@ -14,7 +16,25 @@ String? _extractLogin(Request request, UserService userService) {
   return userService.verifyToken(header.substring(7));
 }
 
-Router buildRestaurantRouter({required UserService userService}) {
+List<RestaurantPreviewInfo> buildRestaurantPreviews(List<String> urls, MenuCache menuCache) {
+  return urls.map((url) {
+    final info = menuCache.readRestaurantInfo(url);
+    final categories = menuCache.readOriginal(url) ?? [];
+    final totalItems = categories.fold(0, (sum, c) => sum + c.items.length);
+    final itemsWithPrice = categories.fold(
+      0,
+      (sum, c) => sum + c.items.where((item) => item.variations.any((v) => v.price != null)).length,
+    );
+    return RestaurantPreviewInfo(
+      url: url,
+      name: info?.name,
+      totalItems: totalItems,
+      itemsWithPrice: itemsWithPrice,
+    );
+  }).toList();
+}
+
+Router buildRestaurantRouter({required UserService userService, required MenuCache menuCache}) {
   final router = Router();
 
   router.get('/', (Request request) async {
@@ -22,7 +42,11 @@ Router buildRestaurantRouter({required UserService userService}) {
     if (login == null) return _unauthorized();
     final user = userService.getUser(login);
     if (user == null) return _unauthorized('User not found');
-    return Response.ok(jsonEncode({'urls': user.urls}), headers: {'Content-Type': 'application/json'});
+    final previews = buildRestaurantPreviews(user.urls, menuCache);
+    return Response.ok(
+      jsonEncode({'restaurants': previews.map((p) => p.toJson()).toList()}),
+      headers: {'Content-Type': 'application/json'},
+    );
   });
 
   router.post('/', (Request request) async {
@@ -35,7 +59,11 @@ Router buildRestaurantRouter({required UserService userService}) {
     }
     final user = userService.addUrl(login, url);
     if (user == null) return _unauthorized('User not found');
-    return Response.ok(jsonEncode({'urls': user.urls}), headers: {'Content-Type': 'application/json'});
+    final previews = buildRestaurantPreviews(user.urls, menuCache);
+    return Response.ok(
+      jsonEncode({'restaurants': previews.map((p) => p.toJson()).toList()}),
+      headers: {'Content-Type': 'application/json'},
+    );
   });
 
   router.delete('/', (Request request) async {
@@ -48,7 +76,11 @@ Router buildRestaurantRouter({required UserService userService}) {
     }
     final user = userService.removeUrl(login, url);
     if (user == null) return _unauthorized('User not found');
-    return Response.ok(jsonEncode({'urls': user.urls}), headers: {'Content-Type': 'application/json'});
+    final previews = buildRestaurantPreviews(user.urls, menuCache);
+    return Response.ok(
+      jsonEncode({'restaurants': previews.map((p) => p.toJson()).toList()}),
+      headers: {'Content-Type': 'application/json'},
+    );
   });
 
   return router;
