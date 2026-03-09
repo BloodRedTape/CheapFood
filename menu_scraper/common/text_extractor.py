@@ -51,6 +51,7 @@ class TextMenuExtractor:
     async def extract(
         self,
         text: str,
+        page_title: str | None = None,
         log_dir: Path | None = None,
         filename: str | None = None,
     ) -> list[MenuCategory]:
@@ -60,6 +61,7 @@ class TextMenuExtractor:
             stem = Path(filename).stem
             log_path = log_dir / f"{stem}.llm.txt"
 
+        user_content = f"Page title: {page_title}\n\n{text}" if page_title else text
         response = None
         for attempt in range(self.MAX_RETRIES):
             try:
@@ -74,7 +76,7 @@ class TextMenuExtractor:
                     model=self._model,
                     messages=[
                         {"role": "system", "content": SYSTEM_PROMPT},
-                        {"role": "user", "content": text},
+                        {"role": "user", "content": user_content},
                     ],
                     response_format=MenuCategoryList,
                     max_completion_tokens=16384,
@@ -85,7 +87,7 @@ class TextMenuExtractor:
                 logger.info("OpenAI extracted %d items in %d categories", total, len(result.categories))
 
                 if log_path is not None:
-                    _save_log(log_path, text, result.model_dump_json())
+                    _save_log(log_path, user_content, result.model_dump_json())
 
                 return result.categories
 
@@ -99,7 +101,7 @@ class TextMenuExtractor:
                 else:
                     logger.error("OpenAI extraction failed after %d retries", self.MAX_RETRIES)
                     if log_path is not None:
-                        _save_log(log_path, text, f"ERROR: {exc}")
+                        _save_log(log_path, user_content, f"ERROR: {exc}")
                     return []
 
             except ValidationError as exc:
@@ -110,19 +112,19 @@ class TextMenuExtractor:
                     filename, finish_reason, attempt + 1, self.MAX_RETRIES, len(raw or ""), exc,
                 )
                 if log_path is not None:
-                    _save_log(log_path, text, f"PARSE ERROR ({finish_reason}):\n{exc}\n\nRAW:\n{raw}")
+                    _save_log(log_path, user_content, f"PARSE ERROR ({finish_reason}):\n{exc}\n\nRAW:\n{raw}")
                 return []
 
             except APIError as exc:
                 if exc.code == "context_length_exceeded":
                     logger.error(
                         "OpenAI context length exceeded (file=%s, input_chars=%d): %s",
-                        filename, len(text), exc,
+                        filename, len(user_content), exc,
                     )
                 else:
                     logger.exception("OpenAI API error (file=%s): %s", filename, exc)
                 if log_path is not None:
-                    _save_log(log_path, text, f"ERROR: {exc}")
+                    _save_log(log_path, user_content, f"ERROR: {exc}")
                 return []
 
             except Exception:

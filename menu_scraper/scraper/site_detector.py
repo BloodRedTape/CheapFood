@@ -15,10 +15,13 @@ _CHOICEQR_SIGNALS: list[str] = [
     "choiceqr",
 ]
 
+_CHOICEQR_MIN_SIGNALS: int = 3
+
 
 def detect_site_type(html: str) -> SiteType:
     """Detect site type from HTML content of the main page."""
-    for signal in _CHOICEQR_SIGNALS:
-        if signal in html:
+    if "__NEXT_DATA__" in html:
+        signal_count = sum(1 for s in _CHOICEQR_SIGNALS if s in html)
+        if signal_count >= _CHOICEQR_MIN_SIGNALS:
             return SiteType.CHOICEQR
     return SiteType.GENERIC

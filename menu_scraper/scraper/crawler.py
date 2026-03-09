@@ -17,8 +17,8 @@ from menu_scraper.utils.media_handler import looks_like_pdf
 
 logger: logging.Logger = logging.getLogger(__name__)
 
-MAX_DEPTH: int = 2
-MAX_PAGES: int = 20
+MAX_DEPTH: int = 3
+MAX_PAGES: int = 40
 USER_AGENT: str = "MenuScraper/1.0"
 
 MENU_KEYWORDS: set[str] = {
@@ -26,7 +26,17 @@ MENU_KEYWORDS: set[str] = {
     "drink", "beverage", "soup", "salad", "pizza", "pasta",
     "burger", "sandwich", "price", "order",
     "תפריט", "מנות", "מחיר",
+    # Czech/Slovak
+    "jidelni", "jídelní", "listek", "lístek", "napoje", "napojovy", "nápojový",
+    "steaky", "jidlo", "jídlo", "poledni", "polední",
 }
+
+_NOISE_SEGMENTS: frozenset[str] = frozenset({
+    "galerie", "gallery", "o-nas", "about", "kontakt", "contact",
+    "partneri", "partners", "aktuality", "news", "blog",
+    "karriera", "kariera", "jobs", "career",
+    "obchodni-podminky", "gdpr", "cookies",
+})
 
 
 @dataclass
@@ -58,7 +68,8 @@ class MenuCrawler:
                 tasks = [self._process_url(client, u, depth) for u in current_urls]
                 results = await asyncio.gather(*tasks)
 
-                next_urls: set[str] = set()
+                next_urls: list[str] = []
+                next_seen: set[str] = set()
                 for res in results:
                     if not res:
                         continue
@@ -68,11 +79,12 @@ class MenuCrawler:
                     all_media.extend(media)
 
                     for link in links:
-                        if link not in visited and len(visited) + len(next_urls) < MAX_PAGES:
+                        if link not in visited and link not in next_seen and len(visited) + len(next_urls) < MAX_PAGES:
                             visited.add(link)
-                            next_urls.add(link)
+                            next_seen.add(link)
+                            next_urls.append(link)
 
-                current_urls = list(next_urls)
+                current_urls = next_urls
 
         # Дедупликация медиа
         seen_urls: set[str] = set()
@@ -130,21 +142,44 @@ def _url_to_filename(url: str) -> str:
     return f"{safe}_{url_hash}.html"
 
 
+def _link_score(url: str, anchor: str) -> int:
+    """Higher score = more likely to contain menu content. Negative = noise."""
+    combined = f"{url} {anchor}".lower()
+    path_segments = set(urlparse(url).path.strip("/").split("/"))
+    if path_segments & _NOISE_SEGMENTS:
+        return -1
+    score = sum(1 for kw in MENU_KEYWORDS if kw in combined)
+    return score
+
+
 def _find_subpage_links(sel: Selector, base_url: str) -> list[str]:
-    absolute_links: list[str] = []
-    for link in sel.css("a::attr(href)").getall():
-        clean_link = link.strip()
-        if not clean_link:
+    seen: set[str] = set()
+    scored: list[tuple[int, str]] = []
+    base_netloc = urlparse(base_url).netloc
+
+    for a in sel.css("a"):
+        href = a.attrib.get("href", "").strip()
+        anchor = a.css("::text").get(default="")
+        if not href:
             continue
-        if clean_link.startswith(("mailto:", "tel:", "javascript:", "#")):
+        if href.startswith(("mailto:", "tel:", "javascript:", "#")):
             continue
-        full_url = urljoin(base_url, clean_link)
+        full_url = urljoin(base_url, href)
         parsed = urlparse(full_url)
         if parsed.scheme not in ("http", "https"):
             continue
-        if urlparse(full_url).netloc == urlparse(base_url).netloc:
-            absolute_links.append(full_url)
-    return absolute_links
+        if parsed.netloc != base_netloc:
+            continue
+        if full_url in seen:
+            continue
+        seen.add(full_url)
+        score = _link_score(full_url, anchor)
+        if score >= 0:
+            scored.append((score, full_url))
+
+    # Higher score first — menu-relevant pages visited before noise
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [url for _, url in scored]
 
 
 def _extract_pdf_links(sel: Selector, base_url: str) -> list[MediaFile]:

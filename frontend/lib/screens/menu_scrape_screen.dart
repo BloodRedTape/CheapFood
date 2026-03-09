@@ -134,11 +134,15 @@ class _SuccessView extends StatelessWidget {
         if (cubitState is! ScrapeSuccess) return const SizedBox.shrink();
         final categories = cubitState.categories;
         final totalItems = categories.fold(0, (sum, c) => sum + c.items.length);
+        final itemsWithPrice = categories.fold(
+          0,
+          (sum, c) => sum + c.items.where((item) => item.variations.any((v) => v.price != null)).length,
+        );
 
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('$totalItems items found', style: ShadTheme.of(context).textTheme.muted),
+            Text('$totalItems items found, $itemsWithPrice with price', style: ShadTheme.of(context).textTheme.muted),
             const SizedBox(height: 12),
             Expanded(child: _CategoryTabView(state: cubitState, categories: categories)),
           ],
