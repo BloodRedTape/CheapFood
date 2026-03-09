@@ -29,8 +29,8 @@ def _extract_next_data(html: str) -> dict | None:
 
 
 def _parse_price(raw: int) -> Decimal:
-    """choiceQR stores price in millicentimes (89000 = 89.00)."""
-    return Decimal(raw) / Decimal(1000)
+    """choiceQR stores price in centimes (5000 = 50.00)."""
+    return Decimal(raw) / Decimal(100)
 
 
 class ChoiceQrParser:
@@ -66,37 +66,48 @@ class ChoiceQrParser:
             if "_id" in c and "name" in c
         }
 
-        # Collect items from all blocks of type "menu"
-        blocks: list[dict] = app.get("template", {}).get("blocks", [])
+        # Collect items from app.menu (full menu list)
+        raw_menu: list[dict] = app.get("menu", [])
         items_by_category: dict[str, list[MenuItem]] = {}
 
-        for block in blocks:
-            if block.get("type") != "menu":
+        for raw_item in raw_menu:
+            if not raw_item.get("available", True):
                 continue
-            for raw_item in block.get("items", []):
-                if not raw_item.get("active", True):
-                    continue
-                name: str = raw_item.get("name", "").strip()
-                if not name:
-                    continue
+            name: str = raw_item.get("name", "").strip()
+            if not name:
+                continue
 
-                raw_price: int | None = raw_item.get("price")
-                variation = MenuItemVariation(
-                    price=_parse_price(raw_price) if raw_price is not None else None,
-                    currency=currency or None,
-                )
+            raw_price: int | None = raw_item.get("price")
+            weight: int | str | None = raw_item.get("weight") or None
+            weight_type: str | None = raw_item.get("weightType") or None
 
-                item = MenuItem(
-                    name=name,
-                    description=raw_item.get("description", "").strip() or None,
-                    variations=[variation],
-                )
+            unit: str | None = None
+            unit_size: Decimal | None = None
+            if weight is not None and weight_type:
+                unit = weight_type
+                try:
+                    unit_size = Decimal(str(weight))
+                except Exception:
+                    pass
 
-                cat_id: str = raw_item.get("category", "")
-                cat_name: str = cat_map.get(cat_id, "")
-                if cat_name not in items_by_category:
-                    items_by_category[cat_name] = []
-                items_by_category[cat_name].append(item)
+            variation = MenuItemVariation(
+                price=_parse_price(raw_price) if raw_price is not None else None,
+                currency=currency or None,
+                unit=unit,
+                unit_size=unit_size,
+            )
+
+            item = MenuItem(
+                name=name,
+                description=raw_item.get("description", "").strip() or None,
+                variations=[variation],
+            )
+
+            cat_id: str = raw_item.get("category", "")
+            cat_name: str = cat_map.get(cat_id, "")
+            if cat_name not in items_by_category:
+                items_by_category[cat_name] = []
+            items_by_category[cat_name].append(item)
 
         return [
             MenuCategory(name=name or None, items=items)
