@@ -19,6 +19,7 @@ dependencies = [
     "pymupdf>=1.24",
     "pymupdf4llm>=0.0.17",
     "trafilatura",
+    "json-repair>=0.30",
 ]
 
 [tool.setuptools.packages.find]

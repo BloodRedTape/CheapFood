@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 
 from openai import AsyncOpenAI, RateLimitError, APIError
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from menu_scraper.models.menu import MenuCategory
 from menu_scraper.processing.prompts import MENU_ITEM_FIELDS, MENU_ITEM_RULES
@@ -55,15 +55,12 @@ class TextMenuExtractor:
         filename: str | None = None,
     ) -> list[MenuCategory]:
         """Send text to OpenAI and parse structured response."""
-        if not text.strip():
-            logger.info("No text provided")
-            return []
-
         log_path: Path | None = None
         if log_dir is not None and filename is not None:
             stem = Path(filename).stem
             log_path = log_dir / f"{stem}.llm.txt"
 
+        response = None
         for attempt in range(self.MAX_RETRIES):
             try:
                 async with self._rate_lock:
@@ -80,6 +77,7 @@ class TextMenuExtractor:
                         {"role": "user", "content": text},
                     ],
                     response_format=MenuCategoryList,
+                    max_completion_tokens=16384,
                 )
 
                 result: MenuCategoryList = response.choices[0].message.parsed or MenuCategoryList()
@@ -104,8 +102,25 @@ class TextMenuExtractor:
                         _save_log(log_path, text, f"ERROR: {exc}")
                     return []
 
+            except ValidationError as exc:
+                finish_reason = response.choices[0].finish_reason if response is not None else "no_response"
+                raw = response.choices[0].message.content if response is not None else ""
+                logger.error(
+                    "OpenAI response parsing failed (file=%s, finish_reason=%s, attempt %d/%d, raw_len=%d): %s",
+                    filename, finish_reason, attempt + 1, self.MAX_RETRIES, len(raw or ""), exc,
+                )
+                if log_path is not None:
+                    _save_log(log_path, text, f"PARSE ERROR ({finish_reason}):\n{exc}\n\nRAW:\n{raw}")
+                return []
+
             except APIError as exc:
-                logger.exception("OpenAI API error: %s", exc)
+                if exc.code == "context_length_exceeded":
+                    logger.error(
+                        "OpenAI context length exceeded (file=%s, input_chars=%d): %s",
+                        filename, len(text), exc,
+                    )
+                else:
+                    logger.exception("OpenAI API error (file=%s): %s", filename, exc)
                 if log_path is not None:
                     _save_log(log_path, text, f"ERROR: {exc}")
                 return []
