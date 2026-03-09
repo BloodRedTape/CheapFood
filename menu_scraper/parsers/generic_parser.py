@@ -8,12 +8,13 @@ from pathlib import Path
 
 import httpx
 
-from menu_scraper.models.menu import MediaFile, MenuCategory, MenuSourceType
+from menu_scraper.models.menu import MediaFile, MenuCategory, MenuSourceType, RestaurantInfo
 from menu_scraper.scraper.crawler import CrawlResult
-from menu_scraper.utils.media_handler import  download_pdf
+from menu_scraper.utils.media_handler import download_pdf
 from menu_scraper.common.html_extractor import HtmlMenuExtractor
 from menu_scraper.common.menu_enhancer import MenuEnhancer
 from menu_scraper.common.pdf_extractor import PdfMenuExtractor
+from menu_scraper.common.restaurant_info_extractor import RestaurantInfoExtractor
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -23,27 +24,24 @@ ProgressCallback = Callable[[str], Coroutine[None, None, None]]
 
 
 class GenericParser:
-    def __init__(
-        self,
-        html_extractor: HtmlMenuExtractor,
-        pdf_extractor: PdfMenuExtractor,
-        menu_enhancer: MenuEnhancer,
-        timeout: int = 30,
-    ) -> None:
-        self.html_extractor = html_extractor
-        self.pdf_extractor = pdf_extractor
-        self.menu_enhancer = menu_enhancer
+    def __init__(self, api_key: str, timeout: int = 30) -> None:
+        self.html_extractor = HtmlMenuExtractor(api_key=api_key)
+        self.pdf_extractor = PdfMenuExtractor(api_key=api_key)
+        self.menu_enhancer = MenuEnhancer(api_key=api_key)
+        self.restaurant_info_extractor = RestaurantInfoExtractor(api_key=api_key)
         self.timeout = timeout
 
     async def parse(
         self,
         crawl_result: CrawlResult,
+        site_url: str,
         log_dir: Path,
         html_extractor_dir: Path,
         pdf_extractor_dir: Path,
         enhancer_dir: Path,
+        restaurant_info_dir: Path,
         on_progress: ProgressCallback | None = None,
-    ) -> list[MenuCategory]:
+    ) -> tuple[list[MenuCategory], RestaurantInfo]:
         async def _progress(msg: str) -> None:
             if on_progress:
                 await on_progress(msg)
@@ -123,4 +121,8 @@ class GenericParser:
         ]
 
         await _progress("Enhancing menu...")
-        return await self.menu_enhancer.enhance(result, on_progress=on_progress, log_dir=enhancer_dir)
+        categories = await self.menu_enhancer.enhance(result, on_progress=on_progress, log_dir=enhancer_dir)
+        restaurant_info = await self.restaurant_info_extractor.extract_from_pages(
+            crawl_result.pending_texts, site_url=site_url, log_dir=restaurant_info_dir,
+        )
+        return categories, restaurant_info
