@@ -7,7 +7,7 @@ import re
 from decimal import Decimal
 from pathlib import Path
 
-from menu_scraper.models.menu import MenuItem, MenuCategory, MenuItemVariation
+from menu_scraper.models.menu import MenuItem, MenuCategory, MenuItemVariation, RestaurantInfo
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -15,6 +15,8 @@ _NEXT_DATA_RE = re.compile(
     r'<script[^>]+id=["\']__NEXT_DATA__["\'][^>]*>(.*?)</script>',
     re.DOTALL,
 )
+
+_DAY_NAMES: list[str] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
 
 
 def _extract_next_data(html: str) -> dict | None:
@@ -33,9 +35,42 @@ def _parse_price(raw: int) -> Decimal:
     return Decimal(raw) / Decimal(100)
 
 
+def _format_time(t: str) -> str:
+    """'11:00:00.000' → '11:00'"""
+    return t[:5]
+
+
+def _format_work_time(work_time_all: list[dict]) -> str | None:
+    """Convert workTimeAll array to human-readable string like 'Mon–Fri 11:00–22:00, Sat 11:00–23:00, Sun 12:00–21:00'."""
+    active = [d for d in work_time_all if d.get("active", False)]
+    if not active:
+        return None
+
+    # Group consecutive days with same hours
+    day_groups: list[tuple[list[int], str]] = []
+    for day in sorted(active, key=lambda d: d["dayOfWeek"]):
+        day_idx: int = day["dayOfWeek"]
+        from_t: str = _format_time(day.get("from", ""))
+        till_t: str = _format_time(day.get("till", ""))
+        hours: str = f"{from_t}–{till_t}"
+        if day_groups and day_groups[-1][1] == hours and day_groups[-1][0][-1] == day_idx - 1:
+            day_groups[-1][0].append(day_idx)
+        else:
+            day_groups.append(([day_idx], hours))
+
+    parts: list[str] = []
+    for days, hours in day_groups:
+        if len(days) == 1:
+            parts.append(f"{_DAY_NAMES[days[0]]} {hours}")
+        else:
+            parts.append(f"{_DAY_NAMES[days[0]]}–{_DAY_NAMES[days[-1]]} {hours}")
+
+    return ", ".join(parts) if parts else None
+
+
 class ChoiceQrParser:
-    def parse(self, pages: list[tuple[str, str]], log_dir: Path) -> list[MenuCategory]:
-        """Parse menu from crawled HTML pages.
+    def parse(self, pages: list[tuple[str, str]], log_dir: Path) -> tuple[list[MenuCategory], RestaurantInfo]:
+        """Parse menu and restaurant info from crawled HTML pages.
 
         Args:
             pages: list of (html_content, filename) tuples from CrawlResult.pending_texts
@@ -45,18 +80,26 @@ class ChoiceQrParser:
             data = _extract_next_data(html)
             if data is not None:
                 logger.info("choiceQR: found __NEXT_DATA__ in %s", filename)
-                categories = self._parse_data(data)
+                categories, info = self._parse_data(data)
                 if categories:
                     self._dump_debug(data, log_dir)
-                    return categories
+                    return categories, info
                 logger.warning("choiceQR: __NEXT_DATA__ found but no menu items in %s", filename)
 
         logger.warning("choiceQR: no usable __NEXT_DATA__ found in any page")
-        return []
+        return [], RestaurantInfo()
 
-    def _parse_data(self, data: dict) -> list[MenuCategory]:
+    def _parse_data(self, data: dict) -> tuple[list[MenuCategory], RestaurantInfo]:
         app: dict = data.get("props", {}).get("app", {})
-        currency: str = app.get("place", {}).get("currency", "")
+        place: dict = app.get("place", {})
+        currency: str = place.get("currency", "")
+
+        # Restaurant info
+        info = RestaurantInfo(
+            name=place.get("name") or None,
+            working_hours=_format_work_time(place.get("workTimeAll", [])),
+            site_language=app.get("language", {}).get("current") or None,
+        )
 
         # Build category id → name map
         raw_categories: list[dict] = app.get("categories", [])
@@ -109,11 +152,12 @@ class ChoiceQrParser:
                 items_by_category[cat_name] = []
             items_by_category[cat_name].append(item)
 
-        return [
+        categories = [
             MenuCategory(name=name or None, items=items)
             for name, items in items_by_category.items()
             if items
         ]
+        return categories, info
 
     def _dump_debug(self, data: dict, log_dir: Path) -> None:
         debug_path = log_dir / "choiceqr_parsed.json"

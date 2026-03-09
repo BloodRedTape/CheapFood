@@ -89,8 +89,7 @@ async def scrape_menu(
 
     # Stage 3: Parse
     if site_type == SiteType.CHOICEQR:
-        categories = ChoiceQrParser().parse(crawl_result.pending_texts, log_dir=scraper_dir)
-        return categories, RestaurantInfo()
+        return ChoiceQrParser().parse(crawl_result.pending_texts, log_dir=scraper_dir)
 
     # Generic: LLM-based extraction
     return await GenericParser(api_key=settings.openai_api_key, timeout=timeout).parse(
