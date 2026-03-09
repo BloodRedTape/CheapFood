@@ -99,6 +99,23 @@ class MenuCategory(BaseModel):
         return _capitalize_first(v)
 
 
+class RestaurantInfo(BaseModel):
+    name: str | None = None
+    working_hours: str | None = None
+    site_language: str | None = None
+
+    def is_complete(self) -> bool:
+        return self.name is not None and self.site_language is not None
+
+    def merge(self, other: "RestaurantInfo") -> "RestaurantInfo":
+        """Fill missing fields from other."""
+        return RestaurantInfo(
+            name=self.name or other.name,
+            working_hours=self.working_hours or other.working_hours,
+            site_language=self.site_language or other.site_language,
+        )
+
+
 class MenuResult(BaseModel):
     url: str
     restaurant_name: str | None = None

@@ -73,6 +73,20 @@ class MenuCache {
   void writeOriginal(String url, List<MenuCategory> categories) =>
       _writeFile(_fileFor(url, 'original'), categories);
 
+  RestaurantInfo? readRestaurantInfo(String url) {
+    final file = _fileFor(url, 'restaurant_info');
+    if (!file.existsSync()) return null;
+    print('Restaurant info cache hit: ${file.path}');
+    final raw = jsonDecode(file.readAsStringSync()) as Map<String, dynamic>;
+    return RestaurantInfo.fromJson(raw);
+  }
+
+  void writeRestaurantInfo(String url, RestaurantInfo info) {
+    final file = _fileFor(url, 'restaurant_info');
+    file.writeAsStringSync(jsonEncode(info.toJson()));
+    print('Restaurant info cached: ${file.path}');
+  }
+
   List<MenuCategory>? readTranslated(String url, String language) =>
       _readFile(_fileFor(url, language));
 

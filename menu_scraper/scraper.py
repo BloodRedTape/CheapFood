@@ -16,12 +16,13 @@ from menu_scraper.models.menu import (
     MediaFile,
     MenuCategory,
     MenuSourceType,
+    RestaurantInfo,
 )
 from menu_scraper.processing.crawler import MenuCrawler, _looks_like_pdf, download_pdf
 from menu_scraper.processing.html_extractor import HtmlMenuExtractor
-from menu_scraper.processing.image_extractor import ImageMenuExtractor
 from menu_scraper.processing.menu_enhancer import MenuEnhancer
 from menu_scraper.processing.pdf_extractor import PdfMenuExtractor
+from menu_scraper.processing.restaurant_info_extractor import RestaurantInfoExtractor
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -47,7 +48,7 @@ async def scrape_menu(
     timeout: int = 30,
     download_media: bool = True,
     on_progress: ProgressCallback | None = None,
-) -> list[MenuCategory]:
+) -> tuple[list[MenuCategory], RestaurantInfo]:
     async def _progress(msg: str) -> None:
         if on_progress:
             await on_progress(msg)
@@ -61,14 +62,16 @@ async def scrape_menu(
     html_extractor_dir: Path = site_dir / "html_extractor"
     pdf_extractor_dir: Path = site_dir / "pdf_extractor"
     enhancer_dir: Path = site_dir / "enhancer"
+    restaurant_info_dir: Path = site_dir / "restaurant_info"
 
-    for d in (scraper_dir, html_extractor_dir, pdf_extractor_dir, enhancer_dir):
+    for d in (scraper_dir, html_extractor_dir, pdf_extractor_dir, enhancer_dir, restaurant_info_dir):
         await asyncio.to_thread(d.mkdir, parents=True, exist_ok=True)
 
     settings = get_settings()
     html_extractor = HtmlMenuExtractor(api_key=settings.openai_api_key)
     pdf_extractor = PdfMenuExtractor(api_key=settings.openai_api_key)
     menu_enhancer = MenuEnhancer(api_key=settings.openai_api_key)
+    restaurant_info_extractor = RestaurantInfoExtractor(api_key=settings.openai_api_key)
 
     # Если URL ведёт напрямую на PDF — скачиваем и обрабатываем без краулинга
     if _looks_like_pdf(url):
@@ -81,12 +84,13 @@ async def scrape_menu(
         ) as client:
             pdf_result = await download_pdf(client, url, pdf_extractor_dir)
         if not pdf_result:
-            return []
+            return [], RestaurantInfo()
         pdf_data, _ = pdf_result
         await _progress("Extracting menu from PDF...")
         result = await pdf_extractor.extract(pdf_data, source_url=url, log_dir=pdf_extractor_dir)
         await _progress("Enhancing menu...")
-        return await menu_enhancer.enhance(result, on_progress=on_progress, log_dir=enhancer_dir)
+        categories = await menu_enhancer.enhance(result, on_progress=on_progress, log_dir=enhancer_dir)
+        return categories, RestaurantInfo()
 
     await _progress("Crawling website...")
     crawler = MenuCrawler(timeout=timeout, log_dir=scraper_dir)
@@ -164,6 +168,10 @@ async def scrape_menu(
         for name, items in merged.items()
         if items
     ]
-    await _progress("Enhancing menu...")
-    return await menu_enhancer.enhance(result, on_progress=on_progress, log_dir=enhancer_dir)
+    await _progress("Extracting restaurant info and enhancing menu...")
+    categories, restaurant_info = await asyncio.gather(
+        menu_enhancer.enhance(result, on_progress=on_progress, log_dir=enhancer_dir),
+        restaurant_info_extractor.extract_from_pages(pending_texts, site_url=url, log_dir=restaurant_info_dir),
+    )
+    return categories, restaurant_info
 

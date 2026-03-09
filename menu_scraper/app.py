@@ -5,10 +5,11 @@ import json
 import logging
 
 from fastapi import FastAPI, Request
+from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
-from menu_scraper.models.menu import MenuCategory
+from menu_scraper.models.menu import MenuCategory, RestaurantInfo
 from menu_scraper.models.requests import ScrapeRequest
 from menu_scraper.scraper import scrape_menu
 
@@ -20,14 +21,20 @@ app: FastAPI = FastAPI(
     version="0.1.0",
 )
 
-@app.post("/scrape", response_model=list[MenuCategory])
-async def scrape_endpoint(request: ScrapeRequest) -> list[MenuCategory]:
+class ScrapeResult(BaseModel):
+    categories: list[MenuCategory]
+    restaurant_info: RestaurantInfo
+
+
+@app.post("/scrape", response_model=ScrapeResult)
+async def scrape_endpoint(request: ScrapeRequest) -> ScrapeResult:
     """Scrape a restaurant menu from the given URL."""
-    return await scrape_menu(
+    categories, restaurant_info = await scrape_menu(
         url=str(request.url),
         timeout=request.timeout,
         download_media=request.download_media,
     )
+    return ScrapeResult(categories=categories, restaurant_info=restaurant_info)
 
 
 @app.post("/scrape/stream")
@@ -40,13 +47,16 @@ async def scrape_stream_endpoint(request: ScrapeRequest, http_request: Request) 
 
     async def run_scrape() -> None:
         try:
-            categories = await scrape_menu(
+            categories, restaurant_info = await scrape_menu(
                 url=str(request.url),
                 timeout=request.timeout,
                 download_media=request.download_media,
                 on_progress=on_progress,
             )
-            payload = json.dumps([c.model_dump(mode="json") for c in categories])
+            payload = json.dumps({
+                "categories": [c.model_dump(mode="json") for c in categories],
+                "restaurant_info": restaurant_info.model_dump(mode="json"),
+            })
             await queue.put(f"\x00RESULT\x00{payload}")
         except asyncio.CancelledError:
             pass

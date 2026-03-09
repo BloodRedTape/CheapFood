@@ -45,7 +45,8 @@ class ScraperService {
     // Cache hit — serve without touching the deduplicator.
     final translatedCached = language != null && language.isNotEmpty ? _menuCache.readTranslated(url, language) : null;
     if (translatedCached != null) {
-      _finishWithCategories(translatedCached, url: url, language: language, output: outputController).catchError((Object e) {
+      final cachedInfo = _menuCache.readRestaurantInfo(url) ?? const RestaurantInfo();
+      _finishWithCategories(translatedCached, restaurantInfo: cachedInfo, url: url, language: language, output: outputController).catchError((Object e) {
         print('Finish error (translated cache): $e');
         _addError(outputController, 'Scrape failed');
       });
@@ -54,7 +55,8 @@ class ScraperService {
 
     final originalCached = _menuCache.readOriginal(url);
     if (originalCached != null) {
-      _finishWithCategories(originalCached, url: url, language: language, output: outputController).catchError((Object e) {
+      final cachedInfo = _menuCache.readRestaurantInfo(url) ?? const RestaurantInfo();
+      _finishWithCategories(originalCached, restaurantInfo: cachedInfo, url: url, language: language, output: outputController).catchError((Object e) {
         print('Finish error (original cache): $e');
         _addError(outputController, 'Scrape failed');
       });
@@ -128,8 +130,9 @@ class ScraperService {
           return;
         } else if (event is ScraperResultEvent) {
           _menuCache.writeOriginal(url, event.categories);
+          _menuCache.writeRestaurantInfo(url, event.restaurantInfo);
           ioClient.close();
-          await _finishWithCategories(event.categories, url: url, language: language, output: broadcast);
+          await _finishWithCategories(event.categories, restaurantInfo: event.restaurantInfo, url: url, language: language, output: broadcast);
           await broadcast.close();
           _inFlight.remove(url);
           return;
@@ -152,6 +155,7 @@ class ScraperService {
 
   Future<void> _finishWithCategories(
     List<MenuCategory> categories, {
+    required RestaurantInfo restaurantInfo,
     required String url,
     required String? language,
     required StreamController<List<int>> output,
@@ -184,7 +188,7 @@ class ScraperService {
       final raw = await _rateCache.getRates(base);
       final filteredRates = Map.fromEntries(raw.rates.entries.where((e) => allowedCurrencies.contains(e.key)));
       final exchangeRates = ExchangeRates(base: raw.base, rates: filteredRates);
-      _emit(output, ScraperSaturatedResultEvent(ScrapeResponse(categories: categories, exchangeRates: exchangeRates)));
+      _emit(output, ScraperSaturatedResultEvent(ScrapeResponse(categories: categories, exchangeRates: exchangeRates, restaurantInfo: restaurantInfo)));
     } catch (e) {
       print('Exchange rates error: $e');
       _emit(output, ScraperErrorEvent('Exchange rates failed'));

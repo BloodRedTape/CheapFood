@@ -5,7 +5,7 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 
 import '../cubit/scrape_cubit.dart';
 
-String _restaurantName(String url) {
+String _restaurantNameFromUrl(String url) {
   final host = Uri.tryParse(url)?.host ?? url;
   final parts = host.split('.').where((p) => p != 'www').toList();
   return parts.isNotEmpty ? parts.first : host;
@@ -34,7 +34,7 @@ class _MenuScrapeScreenState extends State<MenuScrapeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final title = widget.restaurantUrl != null ? _restaurantName(widget.restaurantUrl!) : '';
+    final fallbackTitle = widget.restaurantUrl != null ? _restaurantNameFromUrl(widget.restaurantUrl!) : '';
     return Scaffold(
       body: Padding(
         padding: const EdgeInsets.all(16),
@@ -45,7 +45,15 @@ class _MenuScrapeScreenState extends State<MenuScrapeScreen> {
               children: [
                 ShadButton.ghost(onPressed: () => Navigator.of(context).pop(), child: const Icon(Icons.arrow_back)),
                 const SizedBox(width: 8),
-                Flexible(child: Text(title, style: ShadTheme.of(context).textTheme.h2, overflow: TextOverflow.ellipsis)),
+                Flexible(
+                  child: BlocBuilder<ScrapeCubit, ScrapeState>(
+                    buildWhen: (_, s) => s is ScrapeSuccess,
+                    builder: (context, state) {
+                      final name = state is ScrapeSuccess ? (state.restaurantInfo.name ?? fallbackTitle) : fallbackTitle;
+                      return Text(name, style: ShadTheme.of(context).textTheme.h2, overflow: TextOverflow.ellipsis);
+                    },
+                  ),
+                ),
                 const SizedBox(width: 8),
                 ShadSelect<String>(
                   initialValue: _selectedLanguage,
@@ -153,10 +161,12 @@ class _CategoryTabView extends StatefulWidget {
 class _CategoryTabViewState extends State<_CategoryTabView> with SingleTickerProviderStateMixin {
   late TabController _tabController;
 
+  int get _tabCount => widget.categories.length + 1; // +1 for Info tab
+
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: widget.categories.length, vsync: this);
+    _tabController = TabController(length: _tabCount, vsync: this);
   }
 
   @override
@@ -164,7 +174,7 @@ class _CategoryTabViewState extends State<_CategoryTabView> with SingleTickerPro
     super.didUpdateWidget(oldWidget);
     if (oldWidget.categories.length != widget.categories.length) {
       _tabController.dispose();
-      _tabController = TabController(length: widget.categories.length, vsync: this);
+      _tabController = TabController(length: _tabCount, vsync: this);
     }
   }
 
@@ -176,34 +186,83 @@ class _CategoryTabViewState extends State<_CategoryTabView> with SingleTickerPro
 
   @override
   Widget build(BuildContext context) {
-    if (widget.categories.isEmpty) return const SizedBox.shrink();
-
     return Column(
       children: [
         TabBar(
           controller: _tabController,
           isScrollable: true,
           tabAlignment: TabAlignment.start,
-          tabs: widget.categories.map((c) => Tab(text: c.name ?? 'Menu')).toList(),
+          tabs: [
+            const Tab(text: 'Info'),
+            ...widget.categories.map((c) => Tab(text: c.name ?? 'Menu')),
+          ],
         ),
         Expanded(
           child: TabBarView(
             controller: _tabController,
-            children:
-                widget.categories.map((category) {
-                  return ListView.separated(
-                    padding: const EdgeInsets.only(top: 12),
-                    itemCount: category.items.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 8),
-                    itemBuilder: (context, index) {
-                      final item = category.items[index];
-                      return _MenuItemCard(item: item, state: widget.state);
-                    },
-                  );
-                }).toList(),
+            children: [
+              _RestaurantInfoTab(info: widget.state.restaurantInfo),
+              ...widget.categories.map((category) {
+                return ListView.separated(
+                  padding: const EdgeInsets.only(top: 12),
+                  itemCount: category.items.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 8),
+                  itemBuilder: (context, index) {
+                    final item = category.items[index];
+                    return _MenuItemCard(item: item, state: widget.state);
+                  },
+                );
+              }),
+            ],
           ),
         ),
       ],
+    );
+  }
+}
+
+class _RestaurantInfoTab extends StatelessWidget {
+  final RestaurantInfo info;
+
+  const _RestaurantInfoTab({required this.info});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = ShadTheme.of(context);
+    return ListView(
+      padding: const EdgeInsets.only(top: 16),
+      children: [
+        if (info.name != null)
+          _InfoRow(label: 'Name', value: info.name!),
+        if (info.workingHours != null)
+          _InfoRow(label: 'Working hours', value: info.workingHours!),
+        if (info.siteLanguage != null)
+          _InfoRow(label: 'Site language', value: info.siteLanguage!),
+        if (info.name == null && info.workingHours == null && info.siteLanguage == null)
+          Center(child: Text('No restaurant info available', style: theme.textTheme.muted)),
+      ],
+    );
+  }
+}
+
+class _InfoRow extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _InfoRow({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = ShadTheme.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(width: 130, child: Text(label, style: theme.textTheme.muted)),
+          Expanded(child: Text(value, style: theme.textTheme.p)),
+        ],
+      ),
     );
   }
 }

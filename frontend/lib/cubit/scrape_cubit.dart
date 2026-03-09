@@ -21,13 +21,14 @@ final class ScrapeStreaming extends ScrapeState {
 final class ScrapeSuccess extends ScrapeState {
   final List<MenuCategory> categories;
   final ExchangeRates exchangeRates;
+  final RestaurantInfo restaurantInfo;
   final String selectedCurrency;
   final String language;
 
-  ScrapeSuccess({required this.categories, required this.exchangeRates, required this.selectedCurrency, required this.language});
+  ScrapeSuccess({required this.categories, required this.exchangeRates, required this.restaurantInfo, required this.selectedCurrency, required this.language});
 
   ScrapeSuccess withCurrency(String currency) =>
-      ScrapeSuccess(categories: categories, exchangeRates: exchangeRates, selectedCurrency: currency, language: language);
+      ScrapeSuccess(categories: categories, exchangeRates: exchangeRates, restaurantInfo: restaurantInfo, selectedCurrency: currency, language: language);
 
   /// Returns null if selectedCurrency is '' (show original).
   /// Otherwise converts [price] from [itemCurrency] to [selectedCurrency].
@@ -88,6 +89,7 @@ class ScrapeCubit extends Cubit<ScrapeState> {
             emit(ScrapeSuccess(
               categories: response.categories,
               exchangeRates: response.exchangeRates,
+              restaurantInfo: response.restaurantInfo,
               selectedCurrency: selectedCurrency,
               language: language ?? '',
             ));

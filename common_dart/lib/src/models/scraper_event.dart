@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'menu_category.dart';
+import 'restaurant_info.dart';
 import 'scrape_response.dart';
 
 sealed class ScraperEvent {
@@ -11,11 +12,19 @@ sealed class ScraperEvent {
   static ScraperEvent? fromSse(String type, String data) => switch (type) {
         'progress' => ScraperProgressEvent(data),
         'error' => ScraperErrorEvent(data),
-        'result' => ScraperResultEvent(
-            (jsonDecode(data) as List<dynamic>)
-                .map((e) => MenuCategory.fromJson(e as Map<String, dynamic>))
-                .toList(),
-          ),
+        'result' => () {
+            final json = jsonDecode(data) as Map<String, dynamic>;
+            final rawCategories = json['categories'] as List<dynamic>;
+            return ScraperResultEvent(
+              categories: rawCategories
+                  .map((e) => MenuCategory.fromJson(e as Map<String, dynamic>))
+                  .toList(),
+              restaurantInfo: json['restaurant_info'] != null
+                  ? RestaurantInfo.fromJson(
+                      json['restaurant_info'] as Map<String, dynamic>)
+                  : const RestaurantInfo(),
+            );
+          }(),
         'saturated_result' => ScraperSaturatedResultEvent(
             ScrapeResponse.fromJson(jsonDecode(data) as Map<String, dynamic>),
           ),
@@ -64,14 +73,15 @@ class ScraperErrorEvent extends ScraperEvent {
   List<int> toSse() => utf8.encode('event: error\ndata: $message\n\n');
 }
 
-/// Raw result from the Python scraper — categories only, no exchange rates.
+/// Raw result from the Python scraper — categories + restaurant info, no exchange rates.
 class ScraperResultEvent extends ScraperEvent {
   final List<MenuCategory> categories;
-  const ScraperResultEvent(this.categories);
+  final RestaurantInfo restaurantInfo;
+  const ScraperResultEvent({required this.categories, required this.restaurantInfo});
 
   @override
   List<int> toSse() => utf8.encode(
-      'event: result\ndata: ${jsonEncode(categories.map((c) => c.toJson()).toList())}\n\n');
+      'event: result\ndata: ${jsonEncode({'categories': categories.map((c) => c.toJson()).toList(), 'restaurant_info': restaurantInfo.toJson()})}\n\n');
 }
 
 /// Enriched result from backend to frontend — categories + exchange rates.
