@@ -160,8 +160,9 @@ async def scrape_menu(
     scraper_dir: Path = site_dir / "scraper"
     html_extractor_dir: Path = site_dir / "html_extractor"
     pdf_extractor_dir: Path = site_dir / "pdf_extractor"
+    enhancer_dir: Path = site_dir / "enhancer"
 
-    for d in (scraper_dir, html_extractor_dir, pdf_extractor_dir):
+    for d in (scraper_dir, html_extractor_dir, pdf_extractor_dir, enhancer_dir):
         await asyncio.to_thread(d.mkdir, parents=True, exist_ok=True)
 
     settings = get_settings()
@@ -185,7 +186,7 @@ async def scrape_menu(
         await _progress("Extracting menu from PDF...")
         result = await pdf_extractor.extract(pdf_data, source_url=url, log_dir=pdf_extractor_dir)
         await _progress("Enhancing menu...")
-        return await menu_enhancer.enhance(result)
+        return await menu_enhancer.enhance(result, on_progress=on_progress, log_dir=enhancer_dir)
 
     visited: set[str] = {url}
     current_urls: list[str] = [url]
@@ -325,7 +326,7 @@ async def scrape_menu(
         if items
     ]
     await _progress("Enhancing menu...")
-    return await menu_enhancer.enhance(result)
+    return await menu_enhancer.enhance(result, on_progress=on_progress, log_dir=enhancer_dir)
 
 
 def _extract_pdf_links(sel: Selector, base_url: str) -> list[MediaFile]:
