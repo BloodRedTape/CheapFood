@@ -9,6 +9,8 @@ import logging
 
 import httpx
 
+from menu_scraper.utils.debug import DebugLogContext
+
 logger: logging.Logger = logging.getLogger(__name__)
 
 
@@ -50,9 +52,9 @@ def _guess_extension(url: str) -> str:
 async def download_pdf(
     client: httpx.AsyncClient,
     url: str,
-    pdf_dir: Path,
+    ctx: DebugLogContext,
 ) -> tuple[bytes, Path] | None:
-    """Download a PDF file and save to disk. Returns (pdf_bytes, local_path) or None."""
+    """Download a PDF file and save via debug context. Returns (pdf_bytes, local_path) or None."""
     try:
         response: httpx.Response = await client.get(url)
         response.raise_for_status()
@@ -70,8 +72,10 @@ async def download_pdf(
     stem: str = parsed.path.strip("/").replace("/", "_").removesuffix(".pdf") or "doc"
     safe_stem: str = re.sub(r"[^a-zA-Z0-9_]", "", stem)[:60]
     filename: str = f"{safe_stem}_{url_hash}.pdf"
-    local_path: Path = pdf_dir / filename
-    local_path.write_bytes(pdf_data)
+    local_path = ctx.write_bytes_file(filename, pdf_data)
+    if local_path is None:
+        # prod mode — return a dummy path (won't be used for reading)
+        local_path = Path(filename)
     logger.info("Saved PDF: %s -> %s (%d bytes)", url, filename, len(pdf_data))
 
     return pdf_data, local_path

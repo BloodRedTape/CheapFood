@@ -3,13 +3,13 @@ from __future__ import annotations
 
 import logging
 import re
-from pathlib import Path
 
 from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
 
 from menu_scraper.models.menu import MenuCategory
 from menu_scraper.common.menu_filter import MenuFilter, ProgressCallback
+from menu_scraper.utils.debug import DebugLogContext
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -53,11 +53,11 @@ class MenuEnhancer:
         self,
         categories: list[MenuCategory],
         on_progress: ProgressCallback | None = None,
-        log_dir: Path | None = None,
+        ctx: DebugLogContext | None = None,
     ) -> list[MenuCategory]:
         """Run all enhancement passes over the menu categories."""
         categories = await MenuFilter(self._client, self._model).filter(
-            categories, on_progress, log_dir
+            categories, on_progress, ctx
         )
         if on_progress:
             await on_progress("Adding category emojis...")

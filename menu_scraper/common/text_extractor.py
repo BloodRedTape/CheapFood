@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from menu_scraper.models.menu import MenuCategory
 from menu_scraper.common.prompts import MENU_ITEM_FIELDS, MENU_ITEM_RULES
+from menu_scraper.utils.debug import DebugLogContext
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -52,14 +53,11 @@ class TextMenuExtractor:
         self,
         text: str,
         page_title: str | None = None,
-        log_dir: Path | None = None,
+        ctx: DebugLogContext | None = None,
         filename: str | None = None,
     ) -> list[MenuCategory]:
         """Send text to OpenAI and parse structured response."""
-        log_path: Path | None = None
-        if log_dir is not None and filename is not None:
-            stem = Path(filename).stem
-            log_path = log_dir / f"{stem}.llm.txt"
+        log_filename: str | None = f"{Path(filename).stem}.llm.txt" if ctx and filename else None
 
         user_content = f"Page title: {page_title}\n\n{text}" if page_title else text
         response = None
@@ -86,8 +84,8 @@ class TextMenuExtractor:
                 total = sum(len(c.items) for c in result.categories)
                 logger.info("OpenAI extracted %d items in %d categories", total, len(result.categories))
 
-                if log_path is not None:
-                    _save_log(log_path, user_content, result.model_dump_json())
+                if ctx and log_filename:
+                    _save_log(ctx, log_filename, user_content, result.model_dump_json())
 
                 return result.categories
 
@@ -100,8 +98,8 @@ class TextMenuExtractor:
                     await asyncio.sleep(self.RETRY_FALLBACK_DELAY)
                 else:
                     logger.error("OpenAI extraction failed after %d retries", self.MAX_RETRIES)
-                    if log_path is not None:
-                        _save_log(log_path, user_content, f"ERROR: {exc}")
+                    if ctx and log_filename:
+                        _save_log(ctx, log_filename, user_content, f"ERROR: {exc}")
                     return []
 
             except ValidationError as exc:
@@ -111,8 +109,8 @@ class TextMenuExtractor:
                     "OpenAI response parsing failed (file=%s, finish_reason=%s, attempt %d/%d, raw_len=%d): %s",
                     filename, finish_reason, attempt + 1, self.MAX_RETRIES, len(raw or ""), exc,
                 )
-                if log_path is not None:
-                    _save_log(log_path, user_content, f"PARSE ERROR ({finish_reason}):\n{exc}\n\nRAW:\n{raw}")
+                if ctx and log_filename:
+                    _save_log(ctx, log_filename, user_content, f"PARSE ERROR ({finish_reason}):\n{exc}\n\nRAW:\n{raw}")
                 return []
 
             except APIError as exc:
@@ -123,20 +121,19 @@ class TextMenuExtractor:
                     )
                 else:
                     logger.exception("OpenAI API error (file=%s): %s", filename, exc)
-                if log_path is not None:
-                    _save_log(log_path, user_content, f"ERROR: {exc}")
+                if ctx and log_filename:
+                    _save_log(ctx, log_filename, user_content, f"ERROR: {exc}")
                 return []
 
             except Exception:
                 logger.exception("OpenAI extraction failed")
-                if log_path is not None:
-                    _save_log(log_path, text, "ERROR: see application logs")
+                if ctx and log_filename:
+                    _save_log(ctx, log_filename, text, "ERROR: see application logs")
                 return []
 
         return []
 
 
-def _save_log(log_path: Path, request_text: str, response_text: str) -> None:
-    """Save LLM request/response pair to a text file."""
+def _save_log(ctx: DebugLogContext, filename: str, request_text: str, response_text: str) -> None:
     content: str = f"REQUEST:\n{request_text}\n\nRESPONSE:\n{response_text}\n"
-    log_path.write_text(content, encoding="utf-8")
+    ctx.write_file(filename, content)

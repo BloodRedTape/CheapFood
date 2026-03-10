@@ -11,6 +11,7 @@ import httpx
 from menu_scraper.models.menu import MediaFile, MenuCategory, MenuSourceType, RestaurantInfo
 from menu_scraper.scraper.crawler import CrawlResult
 from menu_scraper.utils.media_handler import download_pdf
+from menu_scraper.utils.debug import DebugLogContext
 from menu_scraper.common.html_extractor import HtmlMenuExtractor
 from menu_scraper.common.menu_enhancer import MenuEnhancer
 from menu_scraper.common.pdf_extractor import PdfMenuExtractor
@@ -35,11 +36,7 @@ class GenericParser:
         self,
         crawl_result: CrawlResult,
         site_url: str,
-        log_dir: Path,
-        html_extractor_dir: Path,
-        pdf_extractor_dir: Path,
-        enhancer_dir: Path,
-        restaurant_info_dir: Path,
+        ctx: DebugLogContext,
         on_progress: ProgressCallback | None = None,
     ) -> tuple[list[MenuCategory], RestaurantInfo]:
         async def _progress(msg: str) -> None:
@@ -48,6 +45,11 @@ class GenericParser:
 
         pending_texts = crawl_result.pending_texts
         all_media = crawl_result.media_files
+
+        pdf_ctx = ctx.subcontext("pdf_extractor")
+        html_ctx = ctx.subcontext("html_extractor")
+        enhancer_ctx = ctx.subcontext("enhancer")
+        restaurant_info_ctx = ctx.subcontext("restaurant_info")
 
         # Download PDFs in parallel
         pdf_media: list[MediaFile] = [m for m in all_media if m.media_type == MenuSourceType.PDF]
@@ -59,7 +61,7 @@ class GenericParser:
                 timeout=float(self.timeout),
                 headers={"User-Agent": USER_AGENT},
             ) as pdf_client:
-                pdf_dl_tasks = [download_pdf(pdf_client, m.original_url, pdf_extractor_dir) for m in pdf_media]
+                pdf_dl_tasks = [download_pdf(pdf_client, m.original_url, pdf_ctx) for m in pdf_media]
                 pdf_results = list(await asyncio.gather(*pdf_dl_tasks))
 
         total = len(pdf_media) + len(pending_texts)
@@ -78,15 +80,13 @@ class GenericParser:
             pdf_data, local_path = pdf_result
             media_file.local_path = str(local_path)
             logger.info("LLM: processing PDF %s", media_file.original_url)
-            items = await self.pdf_extractor.extract(
-                pdf_data, source_url=media_file.original_url, log_dir=pdf_extractor_dir,
-            )
+            items = await self.pdf_extractor.extract(pdf_data, source_url=media_file.original_url, ctx=pdf_ctx)
             logger.info("LLM: done PDF %s — found %d categories", media_file.original_url, len(items))
             return items
 
         async def _extract_html(html: str, html_filename: str) -> list[MenuCategory]:
             logger.info("LLM: processing HTML %s", html_filename)
-            items = await self.html_extractor.extract(html, filename=html_filename, log_dir=html_extractor_dir)
+            items = await self.html_extractor.extract(html, filename=html_filename, ctx=html_ctx)
             logger.info("LLM: done HTML %s — found %d categories", html_filename, len(items))
             return items
 
@@ -121,8 +121,8 @@ class GenericParser:
         ]
 
         await _progress("Enhancing menu...")
-        categories = await self.menu_enhancer.enhance(result, on_progress=on_progress, log_dir=enhancer_dir)
+        categories = await self.menu_enhancer.enhance(result, on_progress=on_progress, ctx=enhancer_ctx)
         restaurant_info = await self.restaurant_info_extractor.extract_from_pages(
-            crawl_result.pending_texts, site_url=site_url, log_dir=restaurant_info_dir,
+            crawl_result.pending_texts, site_url=site_url, ctx=restaurant_info_ctx,
         )
         return categories, restaurant_info

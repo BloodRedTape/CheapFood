@@ -3,12 +3,12 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Coroutine
-from pathlib import Path
 
 import httpx
 
 from menu_scraper.models.menu import MenuCategory, RestaurantInfo
 from menu_scraper.utils.media_handler import download_pdf
+from menu_scraper.utils.debug import DebugLogContext
 from menu_scraper.common.pdf_extractor import PdfMenuExtractor
 from menu_scraper.common.menu_enhancer import MenuEnhancer
 
@@ -28,8 +28,7 @@ class PdfOnlyParser:
     async def parse(
         self,
         url: str,
-        pdf_extractor_dir: Path,
-        enhancer_dir: Path,
+        ctx: DebugLogContext,
         on_progress: ProgressCallback | None = None,
     ) -> tuple[list[MenuCategory], RestaurantInfo]:
         async def _progress(msg: str) -> None:
@@ -42,14 +41,14 @@ class PdfOnlyParser:
             timeout=float(self.timeout),
             headers={"User-Agent": USER_AGENT},
         ) as client:
-            pdf_result = await download_pdf(client, url, pdf_extractor_dir)
+            pdf_result = await download_pdf(client, url, ctx)
 
         if not pdf_result:
             return [], RestaurantInfo()
 
         pdf_data, _ = pdf_result
         await _progress("Extracting menu from PDF...")
-        categories = await self.pdf_extractor.extract(pdf_data, source_url=url, log_dir=pdf_extractor_dir)
+        categories = await self.pdf_extractor.extract(pdf_data, source_url=url, ctx=ctx.subcontext("pdf_extractor"))
         await _progress("Enhancing menu...")
-        categories = await self.menu_enhancer.enhance(categories, on_progress=on_progress, log_dir=enhancer_dir)
+        categories = await self.menu_enhancer.enhance(categories, on_progress=on_progress, ctx=ctx.subcontext("enhancer"))
         return categories, RestaurantInfo()

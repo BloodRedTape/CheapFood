@@ -1,10 +1,8 @@
 """Core scraper: fetches URL with httpx, crawls subpages, extracts menus via OpenAI/Gemini."""
 from __future__ import annotations
 
-import asyncio
 import logging
 import re
-import shutil
 from collections.abc import Callable, Coroutine
 from pathlib import Path
 from urllib.parse import urlparse
@@ -17,6 +15,7 @@ from menu_scraper.models.menu import (
 from menu_scraper.parsers.choiceqr_parser import ChoiceQrParser
 from menu_scraper.scraper.crawler import MenuCrawler
 from menu_scraper.utils.media_handler import looks_like_pdf
+from menu_scraper.utils.debug import DebugLogContext
 from menu_scraper.parsers.generic_parser import GenericParser
 from menu_scraper.parsers.pdf_only_parser import PdfOnlyParser
 from menu_scraper.scraper.site_detector import SiteType, detect_site_type
@@ -50,19 +49,8 @@ async def scrape_menu(
         if on_progress:
             await on_progress(msg)
 
-    site_dir: Path = RUN_DIR / _url_to_dirname(url)
-
-    if site_dir.exists():
-        await asyncio.to_thread(shutil.rmtree, site_dir)
-
-    scraper_dir: Path = site_dir / "scraper"
-    html_extractor_dir: Path = site_dir / "html_extractor"
-    pdf_extractor_dir: Path = site_dir / "pdf_extractor"
-    enhancer_dir: Path = site_dir / "enhancer"
-    restaurant_info_dir: Path = site_dir / "restaurant_info"
-
-    for d in (scraper_dir, html_extractor_dir, pdf_extractor_dir, enhancer_dir, restaurant_info_dir):
-        await asyncio.to_thread(d.mkdir, parents=True, exist_ok=True)
+    ctx = DebugLogContext(RUN_DIR / _url_to_dirname(url))
+    ctx.clear()
 
     settings = get_settings()
 
@@ -71,14 +59,13 @@ async def scrape_menu(
         logger.info("URL is a direct PDF link, skipping crawl: %s", url)
         return await PdfOnlyParser(api_key=settings.openai_api_key, timeout=timeout).parse(
             url=url,
-            pdf_extractor_dir=pdf_extractor_dir,
-            enhancer_dir=enhancer_dir,
+            ctx=ctx,
             on_progress=on_progress,
         )
 
     # Stage 1: Crawl
     await _progress("Crawling website...")
-    crawler = MenuCrawler(timeout=timeout, log_dir=scraper_dir)
+    crawler = MenuCrawler(timeout=timeout, ctx=ctx.subcontext("scraper"))
     crawl_result = await crawler.crawl(url)
 
     # Stage 2: Detect site type
@@ -89,16 +76,12 @@ async def scrape_menu(
 
     # Stage 3: Parse
     if site_type == SiteType.CHOICEQR:
-        return ChoiceQrParser().parse(crawl_result.pending_texts, log_dir=scraper_dir)
+        return ChoiceQrParser().parse(crawl_result.pending_texts, ctx=ctx.subcontext("scraper"))
 
     # Generic: LLM-based extraction
     return await GenericParser(api_key=settings.openai_api_key, timeout=timeout).parse(
         crawl_result=crawl_result,
         site_url=url,
-        log_dir=scraper_dir,
-        html_extractor_dir=html_extractor_dir,
-        pdf_extractor_dir=pdf_extractor_dir,
-        enhancer_dir=enhancer_dir,
-        restaurant_info_dir=restaurant_info_dir,
+        ctx=ctx,
         on_progress=on_progress,
     )

@@ -36,8 +36,8 @@ sealed class ScraperEvent {
     String? eventType;
     String? eventData;
 
-    await for (final chunk in bytes) {
-      buffer += utf8.decode(chunk);
+    await for (final chunk in bytes.transform(utf8.decoder)) {
+      buffer += chunk;
       final lines = buffer.split('\n');
       buffer = lines.last;
 

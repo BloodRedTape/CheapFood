@@ -20,6 +20,7 @@ class ScraperSettings(BaseSettings):
     user_agent: str = "MenuScraper/1.0"
 
     playwright_enabled: bool = True
+    is_prod: bool = False
 
     openai_api_key: str = ""
     gemini_api_key: str = ""

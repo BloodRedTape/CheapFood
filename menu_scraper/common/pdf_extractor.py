@@ -4,13 +4,13 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
-from pathlib import Path
 
 import pymupdf  # type: ignore[import-untyped]
 import pymupdf4llm  # type: ignore[import-untyped]
 
 from menu_scraper.models.menu import MenuCategory
 from menu_scraper.common.text_extractor import TextMenuExtractor
+from menu_scraper.utils.debug import DebugLogContext
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -40,7 +40,7 @@ class PdfMenuExtractor:
         self,
         pdf_data: bytes,
         source_url: str,
-        log_dir: Path | None = None,
+        ctx: DebugLogContext | None = None,
     ) -> list[MenuCategory]:
         logger.info("Converting PDF to markdown by page: %s", source_url)
         pages = await asyncio.to_thread(_pdf_pages_to_markdown, pdf_data)
@@ -55,12 +55,11 @@ class PdfMenuExtractor:
         url_hash = hashlib.md5(source_url.encode()).hexdigest()[:10]
 
         async def _extract_page(page_text: str, page_num: int) -> list[MenuCategory]:
-            filename: str | None = None
-            if log_dir is not None:
-                filename = f"pdf_{url_hash}_p{page_num}.md"
-                (log_dir / filename).write_text(page_text, encoding="utf-8")
+            filename = f"pdf_{url_hash}_p{page_num}.md"
+            if ctx is not None:
+                ctx.write_file(filename, page_text)
             logger.info("LLM: processing PDF page %d/%d", page_num + 1, len(pages))
-            result = await self._text_extractor.extract(page_text, log_dir=log_dir, filename=filename)
+            result = await self._text_extractor.extract(page_text, ctx=ctx, filename=filename)
             logger.info("LLM: done PDF page %d/%d — found %d categories", page_num + 1, len(pages), len(result))
             return result
 

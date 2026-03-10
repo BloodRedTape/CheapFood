@@ -10,6 +10,7 @@ from bs4 import BeautifulSoup, Tag
 
 from menu_scraper.models.menu import MenuCategory
 from menu_scraper.common.text_extractor import TextMenuExtractor
+from menu_scraper.utils.debug import DebugLogContext
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -135,7 +136,7 @@ class HtmlMenuExtractor:
         self,
         html: str,
         filename: str | None = None,
-        log_dir: Path | None = None,
+        ctx: DebugLogContext | None = None,
     ) -> list[MenuCategory]:
         page_title = extract_page_title(html)
         clean_text = clean_html(html)
@@ -143,9 +144,9 @@ class HtmlMenuExtractor:
             logger.info("No text after cleaning HTML")
             return []
 
-        if log_dir is not None and filename is not None:
+        if ctx is not None and filename is not None:
             stem = Path(filename).stem
-            (log_dir / f"{stem}.txt").write_text(clean_text, encoding="utf-8")
+            ctx.write_file(f"{stem}.txt", clean_text)
 
         MAX_CHUNKS: int = 10
         chunks = _split_chunks(clean_text, MAX_CHUNK_CHARS)
@@ -181,11 +182,11 @@ class HtmlMenuExtractor:
                 self._text_extractor.extract(
                     chunk,
                     page_title=page_title,
-                    log_dir=log_dir,
+                    ctx=ctx,
                     filename=f"{stem}.chunk{i}.md" if stem else None,
                 )
                 for i, chunk in enumerate(chunks)
             ])
             return [cat for cats in chunk_results for cat in cats]
 
-        return await self._text_extractor.extract(clean_text, page_title=page_title, log_dir=log_dir, filename=filename)
+        return await self._text_extractor.extract(clean_text, page_title=page_title, ctx=ctx, filename=filename)

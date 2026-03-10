@@ -5,13 +5,13 @@ import asyncio
 import logging
 import random
 from collections.abc import Callable, Coroutine
-from pathlib import Path
 from typing import Literal
 
 from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
 
 from menu_scraper.models.menu import MenuCategory, MenuItem
+from menu_scraper.utils.debug import DebugLogContext
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -88,7 +88,7 @@ class MenuFilter:
         self,
         categories: list[MenuCategory],
         on_progress: ProgressCallback | None = None,
-        log_dir: Path | None = None,
+        ctx: DebugLogContext | None = None,
     ) -> list[MenuCategory]:
         """Pass 1: align names to items. Pass 2: remove non-food categories."""
         if not categories:
@@ -100,11 +100,11 @@ class MenuFilter:
 
         # Pass 1: align names (all categories — unnamed ones must be renamed from items)
         await _progress(f"Checking category names ({len(categories)} categories)...")
-        categories = await self._pass1_align_names(categories, log_dir)
+        categories = await self._pass1_align_names(categories, ctx)
 
         # Pass 2: filter non-food (all categories, unnamed included)
         await _progress(f"Filtering non-food categories ({len(categories)} categories)...")
-        categories = await self._pass2_filter_food(categories, log_dir)
+        categories = await self._pass2_filter_food(categories, ctx)
         return categories
 
     # --- Pass 1 ---
@@ -112,13 +112,13 @@ class MenuFilter:
     async def _pass1_align_names(
         self,
         categories: list[MenuCategory],
-        log_dir: Path | None,
+        ctx: DebugLogContext | None,
     ) -> list[MenuCategory]:
         batches = _make_batches(categories, _BATCH_SIZE)
         logger.info("Pass 1 (name alignment): %d categories in %d batches", len(categories), len(batches))
 
         tasks = [
-            self._align_names_batch(batch, i, log_dir)
+            self._align_names_batch(batch, i, ctx)
             for i, batch in enumerate(batches)
         ]
         batch_results: list[dict[int, _NameAlignmentDecision]] = await asyncio.gather(*tasks)
@@ -141,10 +141,10 @@ class MenuFilter:
         self,
         batch: list[MenuCategory],
         batch_index: int,
-        log_dir: Path | None,
+        ctx: DebugLogContext | None,
     ) -> dict[int, _NameAlignmentDecision]:
         prompt = _format_batch_with_items(batch, sample_size=10)
-        log_path = log_dir / f"filter_pass1_batch{batch_index}.llm.txt" if log_dir else None
+        log_filename = f"filter_pass1_batch{batch_index}.llm.txt"
         try:
             response = await self._client.beta.chat.completions.parse(
                 model=self._model,
@@ -157,16 +157,16 @@ class MenuFilter:
             parsed = response.choices[0].message.parsed
             if not parsed:
                 logger.warning("Pass 1 batch returned no parsed result")
-                if log_path:
-                    _save_log(log_path, prompt, "NO PARSED RESULT")
+                if ctx:
+                    _save_log(ctx, log_filename, prompt, "NO PARSED RESULT")
                 return {}
-            if log_path:
-                _save_log(log_path, prompt, parsed.model_dump_json())
+            if ctx:
+                _save_log(ctx, log_filename, prompt, parsed.model_dump_json())
             return {d.index: d for d in parsed.decisions}
         except Exception:
             logger.exception("Pass 1 batch failed")
-            if log_path:
-                _save_log(log_path, prompt, "ERROR: see application logs")
+            if ctx:
+                _save_log(ctx, log_filename, prompt, "ERROR: see application logs")
             return {}
 
     # --- Pass 2 ---
@@ -174,13 +174,13 @@ class MenuFilter:
     async def _pass2_filter_food(
         self,
         categories: list[MenuCategory],
-        log_dir: Path | None,
+        ctx: DebugLogContext | None,
     ) -> list[MenuCategory]:
         batches = _make_batches(categories, _BATCH_SIZE)
         logger.info("Pass 2 (food filter): %d categories in %d batches", len(categories), len(batches))
 
         tasks = [
-            self._filter_food_batch(batch, i, log_dir)
+            self._filter_food_batch(batch, i, ctx)
             for i, batch in enumerate(batches)
         ]
         batch_results: list[dict[int, _FoodRelevanceDecision]] = await asyncio.gather(*tasks)
@@ -200,10 +200,10 @@ class MenuFilter:
         self,
         batch: list[MenuCategory],
         batch_index: int,
-        log_dir: Path | None,
+        ctx: DebugLogContext | None,
     ) -> dict[int, _FoodRelevanceDecision]:
         prompt = _format_batch_with_items(batch, sample_size=3)
-        log_path = log_dir / f"filter_pass2_batch{batch_index}.llm.txt" if log_dir else None
+        log_filename = f"filter_pass2_batch{batch_index}.llm.txt"
         try:
             response = await self._client.beta.chat.completions.parse(
                 model=self._model,
@@ -216,16 +216,16 @@ class MenuFilter:
             parsed = response.choices[0].message.parsed
             if not parsed:
                 logger.warning("Pass 2 batch returned no parsed result")
-                if log_path:
-                    _save_log(log_path, prompt, "NO PARSED RESULT")
+                if ctx:
+                    _save_log(ctx, log_filename, prompt, "NO PARSED RESULT")
                 return {}
-            if log_path:
-                _save_log(log_path, prompt, parsed.model_dump_json())
+            if ctx:
+                _save_log(ctx, log_filename, prompt, parsed.model_dump_json())
             return {d.index: d for d in parsed.decisions}
         except Exception:
             logger.exception("Pass 2 batch failed")
-            if log_path:
-                _save_log(log_path, prompt, "ERROR: see application logs")
+            if ctx:
+                _save_log(ctx, log_filename, prompt, "ERROR: see application logs")
             return {}
 
 
@@ -252,7 +252,6 @@ def _sample_items(items: list[MenuItem], n: int) -> list[MenuItem]:
     return random.sample(items, n)
 
 
-def _save_log(log_path: Path, request_text: str, response_text: str) -> None:
-    """Save LLM request/response pair to a text file."""
+def _save_log(ctx: DebugLogContext, filename: str, request_text: str, response_text: str) -> None:
     content: str = f"REQUEST:\n{request_text}\n\nRESPONSE:\n{response_text}\n"
-    log_path.write_text(content, encoding="utf-8")
+    ctx.write_file(filename, content)

@@ -5,9 +5,9 @@ import json
 import logging
 import re
 from decimal import Decimal
-from pathlib import Path
 
 from menu_scraper.models.menu import DaySchedule, MenuItem, MenuCategory, MenuItemVariation, RestaurantInfo
+from menu_scraper.utils.debug import DebugLogContext
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -53,12 +53,12 @@ def _parse_work_time(work_time_all: list[dict]) -> list[DaySchedule]:
 
 
 class ChoiceQrParser:
-    def parse(self, pages: list[tuple[str, str]], log_dir: Path) -> tuple[list[MenuCategory], RestaurantInfo]:
+    def parse(self, pages: list[tuple[str, str]], ctx: DebugLogContext) -> tuple[list[MenuCategory], RestaurantInfo]:
         """Parse menu and restaurant info from crawled HTML pages.
 
         Args:
             pages: list of (html_content, filename) tuples from CrawlResult.pending_texts
-            log_dir: directory for debug output
+            ctx: debug log context for debug output
         """
         best_info: RestaurantInfo = RestaurantInfo()
         for html, filename in pages:
@@ -68,7 +68,7 @@ class ChoiceQrParser:
                 categories, info = self._parse_data(data)
                 best_info = best_info.merge(info)
                 if categories:
-                    self._dump_debug(data, log_dir)
+                    ctx.write_file("choiceqr_parsed.json", json.dumps(data, ensure_ascii=False, indent=2))
                     return categories, best_info
                 logger.warning("choiceQR: __NEXT_DATA__ found but no menu items in %s", filename)
 
@@ -152,10 +152,3 @@ class ChoiceQrParser:
             if items
         ]
         return categories, info
-
-    def _dump_debug(self, data: dict, log_dir: Path) -> None:
-        debug_path = log_dir / "choiceqr_parsed.json"
-        try:
-            debug_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-        except OSError as e:
-            logger.warning("choiceQR: failed to write debug file: %s", e)

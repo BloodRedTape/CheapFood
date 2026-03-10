@@ -6,7 +6,6 @@ import hashlib
 import logging
 import re
 from dataclasses import dataclass, field
-from pathlib import Path
 from urllib.parse import urljoin, urlparse
 
 import httpx
@@ -14,6 +13,7 @@ from parsel import Selector
 
 from menu_scraper.models.menu import MediaFile, MenuSourceType
 from menu_scraper.utils.media_handler import looks_like_pdf
+from menu_scraper.utils.debug import DebugLogContext
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -46,9 +46,9 @@ class CrawlResult:
 
 
 class MenuCrawler:
-    def __init__(self, timeout: int = 30, log_dir: Path = Path(".")) -> None:
+    def __init__(self, timeout: int = 30, ctx: DebugLogContext | None = None) -> None:
         self.timeout = timeout
-        self.log_dir = log_dir
+        self._ctx = ctx
 
     async def crawl(self, url: str) -> CrawlResult:
         visited: set[str] = {url}
@@ -127,8 +127,8 @@ class MenuCrawler:
 
         html: str = response.text
         filename = _url_to_filename(str(response.url))
-        local_path = self.log_dir / filename
-        local_path.write_text(html, encoding="utf-8")
+        if self._ctx is not None:
+            self._ctx.write_file(filename, html)
         logger.info("Saved page [depth=%d]: %s -> %s", depth, response.url, filename)
 
         return html, str(response.url)
