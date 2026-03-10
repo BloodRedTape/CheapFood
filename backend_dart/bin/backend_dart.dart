@@ -39,7 +39,8 @@ void main() async {
           request.url.path.startsWith('auth/') ||
           request.url.path.startsWith('restaurants') ||
           request.url.path.startsWith('scrape/') ||
-          request.url.path == 'health') {
+          request.url.path == 'health' ||
+          request.url.path == 'favicon') {
         return apiHandler(request);
       }
       final staticResponse = await staticHandler(request);
