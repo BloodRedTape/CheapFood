@@ -4,21 +4,14 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../cubit/restaurants_cubit.dart';
 import '../cubit/scrape_cubit.dart';
+import '../widgets/restaurant_widget.dart';
 
 String _restaurantNameFromUrl(String url) {
   final host = Uri.tryParse(url)?.host ?? url;
   final parts = host.split('.').where((p) => p != 'www').toList();
   return parts.isNotEmpty ? parts.first : host;
-}
-
-class MenuScrapeScreen extends StatefulWidget {
-  final String? restaurantUrl;
-
-  const MenuScrapeScreen({super.key, this.restaurantUrl});
-
-  @override
-  State<MenuScrapeScreen> createState() => _MenuScrapeScreenState();
 }
 
 const List<(String, String, String)> _languages = [
@@ -30,74 +23,36 @@ const List<(String, String, String)> _languages = [
   ('🇵🇱', 'Polish', 'pl'),
 ];
 
+class MenuScrapeScreen extends StatefulWidget {
+  final String restaurantUrl;
+
+  const MenuScrapeScreen({super.key, required this.restaurantUrl});
+
+  @override
+  State<MenuScrapeScreen> createState() => _MenuScrapeScreenState();
+}
+
 class _MenuScrapeScreenState extends State<MenuScrapeScreen> {
   String _selectedLanguage = '';
 
   @override
   Widget build(BuildContext context) {
-    final fallbackTitle = widget.restaurantUrl != null ? _restaurantNameFromUrl(widget.restaurantUrl!) : '';
     return Scaffold(
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                ShadButton.ghost(onPressed: () => Navigator.of(context).pop(), child: const Icon(Icons.arrow_back)),
-                const SizedBox(width: 8),
-                Flexible(
-                  child: BlocBuilder<ScrapeCubit, ScrapeState>(
-                    buildWhen: (_, s) => s is ScrapeSuccess,
-                    builder: (context, state) {
-                      final name = state is ScrapeSuccess ? (state.restaurantInfo.name ?? fallbackTitle) : fallbackTitle;
-                      return Text(name, style: ShadTheme.of(context).textTheme.h2, overflow: TextOverflow.ellipsis);
-                    },
-                  ),
-                ),
-                const SizedBox(width: 8),
-                ShadSelect<String>(
-                  initialValue: _selectedLanguage,
-                  onChanged: (value) {
-                    if (value != null) {
-                      setState(() => _selectedLanguage = value);
-                      if (widget.restaurantUrl != null) {
-                        context.read<ScrapeCubit>().scrape(widget.restaurantUrl!, language: value.isEmpty ? null : value);
-                      }
-                    }
-                  },
-                  options: _languages.map((l) => ShadOption(value: l.$3, child: Text('${l.$1} ${l.$2}'))).toList(),
-                  selectedOptionBuilder: (context, value) {
-                    final flag = _languages.firstWhere((l) => l.$3 == value, orElse: () => _languages.first).$1;
-                    return Text(flag);
-                  },
-                ),
-                const SizedBox(width: 8),
-                const _CurrencySelect(),
-              ],
+            _MenuScrapeHeader(
+              url: widget.restaurantUrl,
+              selectedLanguage: _selectedLanguage,
+              onLanguageChanged: (lang) {
+                setState(() => _selectedLanguage = lang);
+                context.read<RestaurantsCubit>().scrape(widget.restaurantUrl, language: lang.isEmpty ? null : lang);
+              },
             ),
             const SizedBox(height: 16),
-            Expanded(
-              child: BlocBuilder<ScrapeCubit, ScrapeState>(
-                builder:
-                    (context, state) => switch (state) {
-                      ScrapeInitial() => const SizedBox.shrink(),
-                      ScrapeLoading() => const Center(child: CircularProgressIndicator()),
-                      ScrapeStreaming(:final message) => Center(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const CircularProgressIndicator(),
-                            const SizedBox(height: 16),
-                            Text(message, style: ShadTheme.of(context).textTheme.muted),
-                          ],
-                        ),
-                      ),
-                      ScrapeFailure(:final message) => ShadAlert.destructive(title: const Text('Error'), description: Text(message)),
-                      ScrapeSuccess() => _SuccessView(state: state),
-                    },
-              ),
-            ),
+            Expanded(child: _MenuScrapeBody(url: widget.restaurantUrl)),
           ],
         ),
       ),
@@ -105,50 +60,113 @@ class _MenuScrapeScreenState extends State<MenuScrapeScreen> {
   }
 }
 
-class _CurrencySelect extends StatelessWidget {
-  const _CurrencySelect();
+class _MenuScrapeHeader extends RestaurantWidget {
+  final String selectedLanguage;
+  final ValueChanged<String> onLanguageChanged;
+
+  const _MenuScrapeHeader({
+    required super.url,
+    required this.selectedLanguage,
+    required this.onLanguageChanged,
+  });
 
   @override
-  Widget build(BuildContext context) {
-    final cubit = context.read<ScrapeCubit>();
+  bool shouldRebuild(RestaurantEntry prev, RestaurantEntry next) =>
+      RestaurantWidgetPredicates.scrapeStateChanged(prev, next);
+
+  @override
+  Widget buildEntry(BuildContext context, RestaurantEntry entry) {
+    final fallbackTitle = _restaurantNameFromUrl(url);
+    final scrapeState = entry.scrapeState;
+    final name = scrapeState is ScrapeSuccess ? (scrapeState.restaurantInfo.name ?? fallbackTitle) : fallbackTitle;
+    final selectedCurrency = context.read<RestaurantsCubit>().selectedCurrency(url);
     final options = supportedCurrencies.toList()..sort();
-    return ShadSelect<String>(
-      initialValue: cubit.selectedCurrency,
-      onChanged: (value) {
-        if (value != null) cubit.selectCurrency(value);
-      },
-      options: [const ShadOption(value: '', child: Text('🌐 Original')), ...options.map((c) => ShadOption(value: c, child: Text(c)))],
-      selectedOptionBuilder: (context, value) => Text(value.isEmpty ? '🌐' : value),
+
+    return Row(
+      children: [
+        ShadButton.ghost(onPressed: () => Navigator.of(context).pop(), child: const Icon(Icons.arrow_back)),
+        const SizedBox(width: 8),
+        Flexible(child: Text(name, style: ShadTheme.of(context).textTheme.h2, overflow: TextOverflow.ellipsis)),
+        const SizedBox(width: 8),
+        ShadSelect<String>(
+          initialValue: selectedLanguage,
+          onChanged: (value) { if (value != null) onLanguageChanged(value); },
+          options: _languages.map((l) => ShadOption(value: l.$3, child: Text('${l.$1} ${l.$2}'))).toList(),
+          selectedOptionBuilder: (context, value) {
+            final flag = _languages.firstWhere((l) => l.$3 == value, orElse: () => _languages.first).$1;
+            return Text(flag);
+          },
+        ),
+        const SizedBox(width: 8),
+        ShadSelect<String>(
+          initialValue: selectedCurrency,
+          onChanged: (value) {
+            if (value != null) context.read<RestaurantsCubit>().selectCurrency(url, value);
+          },
+          options: [
+            const ShadOption(value: '', child: Text('🌐 Original')),
+            ...options.map((c) => ShadOption(value: c, child: Text(c))),
+          ],
+          selectedOptionBuilder: (context, value) => Text(value.isEmpty ? '🌐' : value),
+        ),
+      ],
     );
   }
 }
 
+class _MenuScrapeBody extends RestaurantWidget {
+  const _MenuScrapeBody({required super.url});
+
+  @override
+  bool shouldRebuild(RestaurantEntry prev, RestaurantEntry next) =>
+      RestaurantWidgetPredicates.scrapeStateChanged(prev, next);
+
+  @override
+  Widget buildEntry(BuildContext context, RestaurantEntry entry) {
+    return switch (entry.scrapeState) {
+      ScrapeInitial() => const SizedBox.shrink(),
+      ScrapeLoading() => const Center(child: CircularProgressIndicator()),
+      ScrapeStreaming(:final message) => Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const CircularProgressIndicator(),
+            const SizedBox(height: 16),
+            Text(message, style: ShadTheme.of(context).textTheme.muted),
+          ],
+        ),
+      ),
+      ScrapeFailure(:final message) => ShadAlert.destructive(
+        title: const Text('Error'),
+        description: Text(message),
+      ),
+      ScrapeSuccess() => _SuccessView(url: url, state: entry.scrapeState as ScrapeSuccess),
+    };
+  }
+}
+
 class _SuccessView extends StatelessWidget {
+  final String url;
   final ScrapeSuccess state;
 
-  const _SuccessView({required this.state});
+  const _SuccessView({required this.url, required this.state});
 
   @override
   Widget build(BuildContext context) {
-    return BlocBuilder<ScrapeCubit, ScrapeState>(
-      builder: (context, cubitState) {
-        if (cubitState is! ScrapeSuccess) return const SizedBox.shrink();
-        final categories = cubitState.categories;
-        final totalItems = categories.fold(0, (sum, c) => sum + c.items.length);
-        final itemsWithPrice = categories.fold(
-          0,
-          (sum, c) => sum + c.items.where((item) => item.variations.any((v) => v.price != null)).length,
-        );
+    final categories = state.categories;
+    final totalItems = categories.fold(0, (sum, c) => sum + c.items.length);
+    final itemsWithPrice = categories.fold(
+      0,
+      (sum, c) => sum + c.items.where((item) => item.variations.any((v) => v.price != null)).length,
+    );
 
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('$totalItems items found, $itemsWithPrice with price', style: ShadTheme.of(context).textTheme.muted),
-            const SizedBox(height: 12),
-            Expanded(child: _CategoryTabView(state: cubitState, categories: categories, restaurantUrl: context.findAncestorStateOfType<_MenuScrapeScreenState>()?.widget.restaurantUrl)),
-          ],
-        );
-      },
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('$totalItems items found, $itemsWithPrice with price', style: ShadTheme.of(context).textTheme.muted),
+        const SizedBox(height: 12),
+        Expanded(child: _CategoryTabView(state: state, categories: categories, restaurantUrl: url)),
+      ],
     );
   }
 }
@@ -156,9 +174,9 @@ class _SuccessView extends StatelessWidget {
 class _CategoryTabView extends StatefulWidget {
   final ScrapeSuccess state;
   final List<MenuCategory> categories;
-  final String? restaurantUrl;
+  final String restaurantUrl;
 
-  const _CategoryTabView({required this.state, required this.categories, this.restaurantUrl});
+  const _CategoryTabView({required this.state, required this.categories, required this.restaurantUrl});
 
   @override
   State<_CategoryTabView> createState() => _CategoryTabViewState();
@@ -167,7 +185,7 @@ class _CategoryTabView extends StatefulWidget {
 class _CategoryTabViewState extends State<_CategoryTabView> with SingleTickerProviderStateMixin {
   late TabController _tabController;
 
-  int get _tabCount => widget.categories.length + 1; // +1 for Info tab
+  int get _tabCount => widget.categories.length + 1;
 
   @override
   void initState() {
@@ -208,17 +226,12 @@ class _CategoryTabViewState extends State<_CategoryTabView> with SingleTickerPro
             controller: _tabController,
             children: [
               _RestaurantInfoTab(info: widget.state.restaurantInfo, websiteUrl: widget.restaurantUrl),
-              ...widget.categories.map((category) {
-                return ListView.separated(
-                  padding: const EdgeInsets.only(top: 12),
-                  itemCount: category.items.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 8),
-                  itemBuilder: (context, index) {
-                    final item = category.items[index];
-                    return _MenuItemCard(item: item, state: widget.state);
-                  },
-                );
-              }),
+              ...widget.categories.map((category) => ListView.separated(
+                padding: const EdgeInsets.only(top: 12),
+                itemCount: category.items.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 8),
+                itemBuilder: (context, index) => _MenuItemCard(item: category.items[index], state: widget.state),
+              )),
             ],
           ),
         ),
@@ -229,9 +242,9 @@ class _CategoryTabViewState extends State<_CategoryTabView> with SingleTickerPro
 
 class _RestaurantInfoTab extends StatelessWidget {
   final RestaurantInfo info;
-  final String? websiteUrl;
+  final String websiteUrl;
 
-  const _RestaurantInfoTab({required this.info, this.websiteUrl});
+  const _RestaurantInfoTab({required this.info, required this.websiteUrl});
 
   static const _dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -242,30 +255,21 @@ class _RestaurantInfoTab extends StatelessWidget {
         info.phones.isEmpty &&
         info.address == null &&
         info.workingHours.isEmpty &&
-        info.siteLanguage == null &&
-        websiteUrl == null;
+        info.siteLanguage == null;
     return ListView(
       padding: const EdgeInsets.only(top: 16),
       children: [
-        if (info.name != null)
-          _InfoRow(label: 'Name', value: info.name!),
-        if (websiteUrl != null)
-          _InfoLinkRow(label: 'Website', url: websiteUrl!),
-        if (info.address != null)
-          _InfoRow(label: 'Address', value: info.address!),
-        if (info.phones.isNotEmpty)
-          _InfoRow(label: 'Phone', value: info.phones.join(', ')),
+        if (info.name != null) _InfoRow(label: 'Name', value: info.name!),
+        _InfoLinkRow(label: 'Website', url: websiteUrl),
+        if (info.address != null) _InfoRow(label: 'Address', value: info.address!),
+        if (info.phones.isNotEmpty) _InfoRow(label: 'Phone', value: info.phones.join(', ')),
         if (info.workingHours.isNotEmpty)
           _InfoRow(
             label: 'Working hours',
-            value: info.workingHours
-                .map((d) => '${_dayNames[d.day]}: ${d.open ?? '?'}–${d.close ?? '?'}')
-                .join('\n'),
+            value: info.workingHours.map((d) => '${_dayNames[d.day]}: ${d.open ?? '?'}–${d.close ?? '?'}').join('\n'),
           ),
-        if (info.siteLanguage != null)
-          _InfoRow(label: 'Site language', value: info.siteLanguage!),
-        if (isEmpty)
-          Center(child: Text('No restaurant info available', style: theme.textTheme.muted)),
+        if (info.siteLanguage != null) _InfoRow(label: 'Site language', value: info.siteLanguage!),
+        if (isEmpty) Center(child: Text('No restaurant info available', style: theme.textTheme.muted)),
       ],
     );
   }
@@ -342,7 +346,7 @@ class _MenuItemCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ShadCard(
-      padding: EdgeInsets.all(16),
+      padding: const EdgeInsets.all(16),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -357,22 +361,21 @@ class _MenuItemCard extends StatelessWidget {
           ),
           Column(
             crossAxisAlignment: CrossAxisAlignment.end,
-            children:
-                item.variations.map((v) {
-                  final convertedPrice = state.convertPrice(v.price, v.currency);
-                  final unitLabel = _unitLabel(v);
-                  return Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (unitLabel != null) ...[Text(unitLabel, style: ShadTheme.of(context).textTheme.muted), const SizedBox(width: 6)],
-                      if (convertedPrice != null)
-                        Text(
-                          '${convertedPrice.toStringAsFixed(2)} ${state.priceLabel(v.currency)}',
-                          style: ShadTheme.of(context).textTheme.p.copyWith(fontWeight: FontWeight.bold),
-                        ),
-                    ],
-                  );
-                }).toList(),
+            children: item.variations.map((v) {
+              final convertedPrice = state.convertPrice(v.price, v.currency);
+              final unitLabel = _unitLabel(v);
+              return Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (unitLabel != null) ...[Text(unitLabel, style: ShadTheme.of(context).textTheme.muted), const SizedBox(width: 6)],
+                  if (convertedPrice != null)
+                    Text(
+                      '${convertedPrice.toStringAsFixed(2)} ${state.priceLabel(v.currency)}',
+                      style: ShadTheme.of(context).textTheme.p.copyWith(fontWeight: FontWeight.bold),
+                    ),
+                ],
+              );
+            }).toList(),
           ),
         ],
       ),

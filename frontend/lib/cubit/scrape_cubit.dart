@@ -73,12 +73,14 @@ class ScrapeCubit extends Cubit<ScrapeState> {
 
       final streamedResponse = await FetchClient(mode: RequestMode.cors).send(streamRequest);
 
+      if (isClosed) return;
       if (streamedResponse.statusCode != 200) {
         emit(ScrapeFailure('Server error: ${streamedResponse.statusCode}'));
         return;
       }
 
       await for (final event in ScraperEvent.parseStream(streamedResponse.stream)) {
+        if (isClosed) return;
         switch (event) {
           case ScraperProgressEvent(:final message):
             emit(ScrapeStreaming(message));
@@ -99,7 +101,7 @@ class ScrapeCubit extends Cubit<ScrapeState> {
         }
       }
     } catch (e) {
-      emit(ScrapeFailure('Connection failed: $e'));
+      if (!isClosed) emit(ScrapeFailure('Connection failed: $e'));
     }
   }
 

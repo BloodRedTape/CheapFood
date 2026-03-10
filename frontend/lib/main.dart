@@ -3,6 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 import 'cubit/auth_cubit.dart';
+import 'cubit/restaurants_cubit.dart';
 import 'screens/login_screen.dart';
 import 'screens/restaurants_screen.dart';
 
@@ -43,7 +44,10 @@ class _RootNavigatorState extends State<_RootNavigator> {
         if (state is AuthSuccess) {
           nav.pushAndRemoveUntil(
             PageRouteBuilder(
-              pageBuilder: (_, __, ___) => const RestaurantsScreen(),
+              pageBuilder: (_, __, ___) => BlocProvider(
+                create: (_) => RestaurantsCubit(token: state.token),
+                child: const RestaurantsScreen(),
+              ),
               transitionsBuilder: (_, animation, __, child) =>
                   FadeTransition(opacity: animation, child: child),
             ),
