@@ -9,7 +9,7 @@ from openai import AsyncOpenAI, APIError, RateLimitError
 from pydantic import BaseModel, Field
 
 from menu_scraper.models.menu import DaySchedule, RestaurantInfo
-from menu_scraper.common.html_extractor import clean_html
+from menu_scraper.common.html_extractor import clean_html, extract_favicon_url
 from menu_scraper.utils.debug import DebugLogContext
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -70,6 +70,13 @@ class RestaurantInfoExtractor:
     ) -> RestaurantInfo:
         """Iterate pages (html, filename) until RestaurantInfo is complete or pages exhausted."""
         info = RestaurantInfo()
+        # Extract favicon from the first page (index page)
+        if pages:
+            first_html = pages[0][0]
+            icon_url = extract_favicon_url(first_html, site_url)
+            if icon_url:
+                info = RestaurantInfo(icon_url=icon_url)
+                logger.info("Favicon found: %s", icon_url)
         for html, filename in pages:
             text = clean_html(html)
             if not text.strip():

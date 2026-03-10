@@ -7,6 +7,7 @@ import re
 from decimal import Decimal
 
 from menu_scraper.models.menu import DaySchedule, MenuItem, MenuCategory, MenuItemVariation, RestaurantInfo
+from menu_scraper.common.html_extractor import extract_favicon_url
 from menu_scraper.utils.debug import DebugLogContext
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -53,14 +54,16 @@ def _parse_work_time(work_time_all: list[dict]) -> list[DaySchedule]:
 
 
 class ChoiceQrParser:
-    def parse(self, pages: list[tuple[str, str]], ctx: DebugLogContext) -> tuple[list[MenuCategory], RestaurantInfo]:
+    def parse(self, pages: list[tuple[str, str]], ctx: DebugLogContext, site_url: str = "") -> tuple[list[MenuCategory], RestaurantInfo]:
         """Parse menu and restaurant info from crawled HTML pages.
 
         Args:
             pages: list of (html_content, filename) tuples from CrawlResult.pending_texts
             ctx: debug log context for debug output
+            site_url: base URL for resolving relative favicon URLs
         """
-        best_info: RestaurantInfo = RestaurantInfo()
+        icon_url = extract_favicon_url(pages[0][0], site_url) if pages and site_url else None
+        best_info: RestaurantInfo = RestaurantInfo(icon_url=icon_url)
         for html, filename in pages:
             data = _extract_next_data(html)
             if data is not None:

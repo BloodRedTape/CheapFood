@@ -51,6 +51,30 @@ def extract_page_title(html: str) -> str | None:
     return None
 
 
+def extract_favicon_url(html: str, base_url: str) -> str | None:
+    """Extract favicon URL from HTML <link> tags, resolved against base_url."""
+    from urllib.parse import urljoin
+    soup = BeautifulSoup(html, "lxml")
+    # Prefer apple-touch-icon (higher quality), then shortcut icon, then icon
+    preferred_rels = [
+        "apple-touch-icon",
+        "apple-touch-icon-precomposed",
+        "shortcut icon",
+        "icon",
+    ]
+    link_tags = soup.find_all("link")
+    for rel_value in preferred_rels:
+        for tag in link_tags:
+            raw_rel = tag.get("rel")
+            rel = raw_rel if raw_rel is not None else []
+            rel_str = " ".join(rel) if isinstance(rel, list) else str(rel)
+            if rel_str.lower() == rel_value and tag.get("href"):
+                href = str(tag["href"]).strip()
+                if href:
+                    return urljoin(base_url, href)
+    return None
+
+
 def clean_html(html: str) -> str:
     soup = BeautifulSoup(html, "lxml")
 

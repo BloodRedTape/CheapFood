@@ -50,6 +50,18 @@
 - Frontend should be in a mobile app style
 - UI text by default should be English
 
+## Frontend State Management
+- `AuthCubit` — auth only (login/register/logout/session restore), no restaurants
+- `RestaurantsCubit` — global cubit (app-level), owns `List<RestaurantEntry>` where each entry has `RestaurantPreviewInfo` + `ScrapeState`
+- `RestaurantsCubit` handles scraping internally (no separate `ScrapeCubit` per restaurant), calls `refresh()` after successful scrape
+- `ScrapeCubit` still exists as state classes only — `ScrapeInitial/Loading/Streaming/Success/Failure`
+- `ScrapeRegistryCubit` is removed — replaced by `RestaurantsCubit`
+- `RestaurantWidget` (`frontend/lib/widgets/restaurant_widget.dart`) — abstract base widget, takes `url`, wraps `BlocBuilder` with `buildWhen` scoped to that URL's entry; override `buildEntry` and optionally `shouldRebuild`
+- `RestaurantWidgetPredicates` mixin — static helpers: `infoChanged`, `scrapeStateChanged`, `loadingChanged`
+- `RestaurantCard` (`frontend/lib/widgets/restaurant_card.dart`) — extends `RestaurantWidget`, shows name, loading spinner, item counts
+- `MenuScrapeScreen` — `_MenuScrapeHeader` and `_MenuScrapeBody` both extend `RestaurantWidget`
+- `RestaurantsScreen` ListView rebuilds only on URL list structure change (`buildWhen: prev.urls != next.urls`)
+
 ## SSE Streaming
 - `menu_scraper` exposes `POST /scrape/stream` — SSE with `progress`, `result`, `error` events
 - `backend_dart` proxies it at `POST /scrape/stream` using `dart:io HttpClient` (not `package:http`)

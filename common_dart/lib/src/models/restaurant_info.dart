@@ -24,6 +24,7 @@ class RestaurantInfo {
   final String? address;
   final List<DaySchedule> workingHours;
   final String? siteLanguage;
+  final String? iconUrl;
 
   const RestaurantInfo({
     this.name,
@@ -31,6 +32,7 @@ class RestaurantInfo {
     this.address,
     this.workingHours = const [],
     this.siteLanguage,
+    this.iconUrl,
   });
 
   factory RestaurantInfo.fromJson(Map<String, dynamic> json) => RestaurantInfo(
@@ -45,6 +47,7 @@ class RestaurantInfo {
                 .toList() ??
             [],
         siteLanguage: json['site_language'] as String?,
+        iconUrl: json['icon_url'] as String?,
       );
 
   Map<String, dynamic> toJson() => {
@@ -53,5 +56,6 @@ class RestaurantInfo {
         'address': address,
         'working_hours': workingHours.map((e) => e.toJson()).toList(),
         'site_language': siteLanguage,
+        'icon_url': iconUrl,
       };
 }

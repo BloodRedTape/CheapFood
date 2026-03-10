@@ -30,6 +30,7 @@ List<RestaurantPreviewInfo> buildRestaurantPreviews(List<String> urls, MenuCache
       name: info?.name,
       totalItems: totalItems,
       itemsWithPrice: itemsWithPrice,
+      iconUrl: info?.iconUrl,
     );
   }).toList();
 }

@@ -111,6 +111,7 @@ class RestaurantInfo(BaseModel):
     address: str | None = None
     working_hours: list[DaySchedule] = Field(default_factory=list)
     site_language: str | None = None
+    icon_url: str | None = None
 
     def is_complete(self) -> bool:
         return self.name is not None and self.site_language is not None
@@ -123,6 +124,7 @@ class RestaurantInfo(BaseModel):
             address=self.address or other.address,
             working_hours=self.working_hours or other.working_hours,
             site_language=self.site_language or other.site_language,
+            icon_url=self.icon_url or other.icon_url,
         )
 
 
