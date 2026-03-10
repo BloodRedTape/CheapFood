@@ -5,7 +5,7 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 import '../cubit/auth_cubit.dart';
 import '../cubit/restaurants_cubit.dart';
 import '../widgets/restaurant_card.dart';
-import 'menu_scrape_screen.dart';
+import 'menu_scrape/menu_scrape_screen.dart';
 
 class RestaurantsScreen extends StatefulWidget {
   const RestaurantsScreen({super.key});

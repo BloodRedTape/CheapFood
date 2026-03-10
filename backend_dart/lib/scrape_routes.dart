@@ -27,13 +27,9 @@ Router buildScrapeRouter({
   final router = Router();
 
   // 5 scrape requests per minute per user
-  final rateLimiter = RateLimiter(maxRequests: 5, window: const Duration(minutes: 1));
+  final rateLimiter = RateLimiter(maxRequests: 10, window: const Duration(minutes: 1));
 
-  final scraperService = ScraperService(
-    menuCache: menuCache,
-    rateCache: rateCache,
-    translationService: translationService,
-  );
+  final scraperService = ScraperService(menuCache: menuCache, rateCache: rateCache, translationService: translationService);
 
   // NOTE: All routes in this router require a valid JWT Bearer token.
   // Any new route added here MUST start with _extractLogin() check before processing.
@@ -41,19 +37,11 @@ Router buildScrapeRouter({
   router.post('/stream', (Request request) async {
     final login = _extractLogin(request, userService);
     if (login == null) {
-      return Response(
-        401,
-        body: ScraperErrorEvent('Unauthorized').toSse(),
-        headers: {'Content-Type': 'text/event-stream'},
-      );
+      return Response(401, body: ScraperErrorEvent('Unauthorized').toSse(), headers: {'Content-Type': 'text/event-stream'});
     }
 
     if (!rateLimiter.allow(login)) {
-      return Response(
-        429,
-        body: ScraperErrorEvent('Too many requests').toSse(),
-        headers: {'Content-Type': 'text/event-stream'},
-      );
+      return Response(429, body: ScraperErrorEvent('Too many requests').toSse(), headers: {'Content-Type': 'text/event-stream'});
     }
 
     final body = await request.readAsString();
@@ -62,12 +50,7 @@ Router buildScrapeRouter({
     final language = requestJson['language'] as String?;
     final forceRefresh = requestJson['force_refresh'] as bool? ?? false;
 
-    final stream = scraperService.scrape(
-      url: url,
-      requestBody: body,
-      language: language,
-      forceRefresh: forceRefresh,
-    );
+    final stream = scraperService.scrape(url: url, requestBody: body, language: language, forceRefresh: forceRefresh);
 
     return _sseResponse(stream);
   });
@@ -76,15 +59,15 @@ Router buildScrapeRouter({
 }
 
 Response _sseResponse(Stream<List<int>> stream) => Response.ok(
-      stream,
-      headers: {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        'X-Accel-Buffering': 'no',
-        'Connection': 'keep-alive',
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type',
-      },
-      context: {'shelf.io.buffer_output': false},
-    );
+  stream,
+  headers: {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'X-Accel-Buffering': 'no',
+    'Connection': 'keep-alive',
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+  },
+  context: {'shelf.io.buffer_output': false},
+);
