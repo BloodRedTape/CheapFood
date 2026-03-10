@@ -1,8 +1,9 @@
 import 'package:common_dart/common_dart.dart';
 import 'package:flutter/material.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
+import 'package:url_launcher/url_launcher.dart';
 
-const double kExpandedHeight = 160;
+const double kExpandedHeight = 180;
 
 const List<(String, String, String)> kLanguages = [
   ('🌐', 'Original', ''),
@@ -72,7 +73,7 @@ class MenuSliverAppBar extends StatelessWidget {
       leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => Navigator.of(context).pop()),
       flexibleSpace: FlexibleSpaceBar(
         collapseMode: CollapseMode.pin,
-        background: _ExpandedBackground(name: name, iconUrl: iconUrl, restaurantInfo: restaurantInfo),
+        background: _ExpandedBackground(name: name, iconUrl: iconUrl, url: restaurantUrl, restaurantInfo: restaurantInfo),
       ),
     );
   }
@@ -88,8 +89,9 @@ class _ExpandedBackground extends StatelessWidget {
   final String name;
   final String? iconUrl;
   final RestaurantInfo? restaurantInfo;
+  final String url;
 
-  const _ExpandedBackground({required this.name, required this.iconUrl, required this.restaurantInfo});
+  const _ExpandedBackground({required this.name, required this.url, required this.iconUrl, required this.restaurantInfo});
 
   static const _dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -162,6 +164,7 @@ class _ExpandedBackground extends StatelessWidget {
               const SizedBox(height: 4),
               _InfoLine(icon: Icons.access_time_outlined, text: _formatHours(info.workingHours)),
             ],
+            ...[const SizedBox(height: 4), _InfoLine(icon: Icons.link, text: Uri.parse(url).origin, url: url)],
           ],
         ],
       ),
@@ -172,19 +175,47 @@ class _ExpandedBackground extends StatelessWidget {
 class _InfoLine extends StatelessWidget {
   final IconData icon;
   final String text;
+  final String? url;
 
-  const _InfoLine({required this.icon, required this.text});
+  const _InfoLine({required this.icon, required this.text, this.url});
+
+  Future<void> _launchUrl() async {
+    if (url == null) return;
+    final uri = Uri.parse(url!);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Icon(icon, size: 16, color: theme.colorScheme.mutedForeground),
-        const SizedBox(width: 6),
-        Expanded(child: Text(text, style: theme.textTheme.muted, maxLines: 2, overflow: TextOverflow.ellipsis)),
-      ],
+    final isLink = url != null && url!.isNotEmpty;
+
+    Widget richText = RichText(
+      maxLines: 2,
+      overflow: TextOverflow.ellipsis,
+      text: TextSpan(
+        children: [
+          WidgetSpan(
+            alignment: PlaceholderAlignment.middle,
+            child: Padding(padding: const EdgeInsets.only(right: 6.0), child: Icon(icon, size: 16, color: theme.colorScheme.mutedForeground)),
+          ),
+          TextSpan(
+            text: text,
+            style: theme.textTheme.muted.copyWith(
+              decoration: isLink ? TextDecoration.underline : TextDecoration.none,
+              color: isLink ? theme.colorScheme.primary : theme.colorScheme.mutedForeground,
+            ),
+          ),
+        ],
+      ),
     );
+
+    if (isLink) {
+      return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(onTap: _launchUrl, child: richText));
+    }
+
+    return richText;
   }
 }

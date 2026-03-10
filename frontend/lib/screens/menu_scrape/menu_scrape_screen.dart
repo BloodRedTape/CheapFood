@@ -44,41 +44,35 @@ class _MenuScrapeScreenState extends State<MenuScrapeScreen> {
         return Scaffold(
           body: switch (scrapeState) {
             ScrapeSuccess() => _SuccessScaffold(
-                url: widget.restaurantUrl,
-                previewInfo: previewInfo,
-                state: scrapeState,
-                selectedLanguage: _selectedLanguage,
-                selectedCurrency: selectedCurrency,
-                currencyOptions: currencyOptions,
-                onLanguageChanged: (lang) {
-                  setState(() => _selectedLanguage = lang);
-                  context.read<RestaurantsCubit>().scrape(
-                    widget.restaurantUrl,
-                    language: lang.isEmpty ? null : lang,
-                  );
-                },
-                onCurrencyChanged: (currency) {
-                  context.read<RestaurantsCubit>().selectCurrency(widget.restaurantUrl, currency);
-                },
-              ),
+              url: widget.restaurantUrl,
+              previewInfo: previewInfo,
+              state: scrapeState,
+              selectedLanguage: _selectedLanguage,
+              selectedCurrency: selectedCurrency,
+              currencyOptions: currencyOptions,
+              onLanguageChanged: (lang) {
+                setState(() => _selectedLanguage = lang);
+                context.read<RestaurantsCubit>().scrape(widget.restaurantUrl, language: lang.isEmpty ? null : lang);
+              },
+              onCurrencyChanged: (currency) {
+                context.read<RestaurantsCubit>().selectCurrency(widget.restaurantUrl, currency);
+              },
+            ),
             _ => _LoadingScaffold(
-                url: widget.restaurantUrl,
-                previewInfo: previewInfo,
-                scrapeState: scrapeState,
-                selectedLanguage: _selectedLanguage,
-                selectedCurrency: selectedCurrency,
-                currencyOptions: currencyOptions,
-                onLanguageChanged: (lang) {
-                  setState(() => _selectedLanguage = lang);
-                  context.read<RestaurantsCubit>().scrape(
-                    widget.restaurantUrl,
-                    language: lang.isEmpty ? null : lang,
-                  );
-                },
-                onCurrencyChanged: (currency) {
-                  context.read<RestaurantsCubit>().selectCurrency(widget.restaurantUrl, currency);
-                },
-              ),
+              url: widget.restaurantUrl,
+              previewInfo: previewInfo,
+              scrapeState: scrapeState,
+              selectedLanguage: _selectedLanguage,
+              selectedCurrency: selectedCurrency,
+              currencyOptions: currencyOptions,
+              onLanguageChanged: (lang) {
+                setState(() => _selectedLanguage = lang);
+                context.read<RestaurantsCubit>().scrape(widget.restaurantUrl, language: lang.isEmpty ? null : lang);
+              },
+              onCurrencyChanged: (currency) {
+                context.read<RestaurantsCubit>().selectCurrency(widget.restaurantUrl, currency);
+              },
+            ),
           },
         );
       },
@@ -130,22 +124,15 @@ class _LoadingScaffold extends StatelessWidget {
             ScrapeInitial() => const SizedBox.shrink(),
             ScrapeLoading() => const Center(child: CircularProgressIndicator()),
             ScrapeStreaming(:final message) => Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const CircularProgressIndicator(),
-                    const SizedBox(height: 16),
-                    Text(message, style: ShadTheme.of(context).textTheme.muted),
-                  ],
-                ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [const CircularProgressIndicator(), const SizedBox(height: 16), Text(message, style: ShadTheme.of(context).textTheme.muted)],
               ),
+            ),
             ScrapeFailure(:final message) => Padding(
-                padding: const EdgeInsets.all(24),
-                child: ShadAlert.destructive(
-                  title: const Text('Error'),
-                  description: Text(message),
-                ),
-              ),
+              padding: const EdgeInsets.all(24),
+              child: ShadAlert.destructive(title: const Text('Error'), description: Text(message)),
+            ),
             ScrapeSuccess() => const SizedBox.shrink(),
           },
         ),
@@ -212,38 +199,33 @@ class _SuccessScaffoldState extends State<_SuccessScaffold> with SingleTickerPro
   @override
   Widget build(BuildContext context) {
     return NestedScrollView(
-      headerSliverBuilder: (context, innerBoxIsScrolled) => [
-        MenuSliverAppBar(
-          restaurantUrl: widget.url,
-          previewInfo: widget.previewInfo,
-          restaurantInfo: widget.state.restaurantInfo,
-          selectedLanguage: widget.selectedLanguage,
-          selectedCurrency: widget.selectedCurrency,
-          currencyOptions: widget.currencyOptions,
-          onLanguageChanged: widget.onLanguageChanged,
-          onCurrencyChanged: widget.onCurrencyChanged,
-        ),
-        SliverPersistentHeader(
-          pinned: true,
-          delegate: CategoryTabsHeader(
-            tabController: _tabController,
-            categories: _categories,
-          ),
-        ),
-      ],
+      headerSliverBuilder:
+          (context, innerBoxIsScrolled) => [
+            MenuSliverAppBar(
+              restaurantUrl: widget.url,
+              previewInfo: widget.previewInfo,
+              restaurantInfo: widget.state.restaurantInfo,
+              selectedLanguage: widget.selectedLanguage,
+              selectedCurrency: widget.selectedCurrency,
+              currencyOptions: widget.currencyOptions,
+              onLanguageChanged: widget.onLanguageChanged,
+              onCurrencyChanged: widget.onCurrencyChanged,
+            ),
+            SliverPersistentHeader(pinned: true, delegate: CategoryTabsHeader(tabController: _tabController, categories: _categories)),
+          ],
       body: TabBarView(
         controller: _tabController,
-        children: _categories.map((category) {
-          return ListView.separated(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            itemCount: category.items.length,
-            separatorBuilder: (_, __) => const Divider(height: 1, indent: 16, endIndent: 16),
-            itemBuilder: (context, index) => MenuItemCard(
-              item: category.items[index],
-              state: widget.state,
-            ),
-          );
-        }).toList(),
+        children:
+            _categories.map((category) {
+              return ListView.builder(
+                itemCount: category.items.length,
+                itemBuilder:
+                    (context, index) => Padding(
+                      padding: EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+                      child: MenuItemCard(item: category.items[index], state: widget.state),
+                    ),
+              );
+            }).toList(),
       ),
     );
   }
