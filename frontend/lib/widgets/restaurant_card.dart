@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
+import '../config.dart';
 import '../cubit/restaurants_cubit.dart';
 import '../cubit/scrape_cubit.dart';
 import 'restaurant_widget.dart';
@@ -24,8 +25,8 @@ class RestaurantCard extends RestaurantWidget {
     final iconUrl = info.iconUrl;
     final uri = Uri.tryParse(url);
     final origin = uri != null ? '${uri.scheme}://${uri.host}' : null;
-    final googleFaviconUrl = origin != null
-        ? 'https://www.google.com/s2/favicons?domain=$origin&sz=32'
+    final proxyFaviconUrl = origin != null
+        ? '$backendUrl/favicon?domain=${Uri.encodeComponent(origin)}'
         : null;
 
     Widget? iconWidget;
@@ -35,13 +36,13 @@ class RestaurantCard extends RestaurantWidget {
         width: 24,
         height: 24,
         fit: BoxFit.contain,
-        errorBuilder: (_, __, ___) => googleFaviconUrl != null
-            ? Image.network(googleFaviconUrl, width: 24, height: 24, fit: BoxFit.contain,
+        errorBuilder: (_, __, ___) => proxyFaviconUrl != null
+            ? Image.network(proxyFaviconUrl, width: 24, height: 24, fit: BoxFit.contain,
                 errorBuilder: (_, __, ___) => const SizedBox(width: 24, height: 24))
             : const SizedBox(width: 24, height: 24),
       );
-    } else if (googleFaviconUrl != null) {
-      iconWidget = Image.network(googleFaviconUrl, width: 24, height: 24, fit: BoxFit.contain,
+    } else if (proxyFaviconUrl != null) {
+      iconWidget = Image.network(proxyFaviconUrl, width: 24, height: 24, fit: BoxFit.contain,
           errorBuilder: (_, __, ___) => const SizedBox(width: 24, height: 24));
     }
 
